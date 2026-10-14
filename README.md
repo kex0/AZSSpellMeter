@@ -1,6 +1,6 @@
 # AZS Spell Meter
 
-Per-spell damage for [Azeroth Survivors](https://github.com/samwhosung/benilla). Damage, DPS, and each spell's share come from the game's own meter, so they match **Damage Done**. Kills are counted on top of that, and a proc is shown on the spell it actually casts.
+Per-spell damage for [Azeroth Survivors](https://wow.aethus.pl/). Damage, DPS, and each spell's share come from the game's own meter, so they match **Damage Done**. Kills are counted on top of that, and a proc is shown on the spell it actually casts.
 
 ![AZS Spell Meter](preview.png)
 
