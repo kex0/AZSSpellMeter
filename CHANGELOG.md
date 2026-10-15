@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.18
+
+- Fixed the chat error that appeared while the meter looked up spell icons. Relog to load it.
+
 ## 1.17
 
 - Damage, DPS, and each spell's share are read from the game's own meter, so they match Damage Done.

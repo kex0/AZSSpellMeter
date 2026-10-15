@@ -637,6 +637,22 @@ local function castList(name)
 	return text
 end
 
+local scanTip
+local scanTipMissing
+
+local function actionTip()
+	if scanTip or scanTipMissing then
+		return scanTip
+	end
+	local ok, tip = pcall(CreateFrame, "GameTooltip", "AZSSpellMeterScanTip", UIParent, "GameTooltipTemplate")
+	if not ok or not tip or not tip.SetOwner or not tip.SetAction then
+		scanTipMissing = true
+		return nil
+	end
+	scanTip = tip
+	return tip
+end
+
 local function scanIcons()
 	if GetSpellName and GetSpellTexture then
 		local i = 1
@@ -649,7 +665,7 @@ local function scanIcons()
 			i = i + 1
 		end
 	end
-	local tip = getglobal("AZSSpellMeterTip")
+	local tip = actionTip()
 	if not tip or not HasAction or not GetActionTexture then
 		return
 	end
@@ -659,7 +675,7 @@ local function scanIcons()
 		if HasAction(slot) then
 			local ok = pcall(tip.SetAction, tip, slot)
 			if ok then
-				local line = getglobal("AZSSpellMeterTipTextLeft1")
+				local line = getglobal("AZSSpellMeterScanTipTextLeft1")
 				if line then
 					rememberIcon(line:GetText(), GetActionTexture(slot))
 				end

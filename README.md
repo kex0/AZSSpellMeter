@@ -37,6 +37,10 @@ While this window is open, the built-in Damage Done meter is hidden. Hiding this
 
 ## Changelog
 
+### 1.18
+
+- Fixed the chat error that appeared while the meter looked up spell icons.
+
 ### 1.17
 
 - Damage, DPS, and share are read from the game's meter. They match Damage Done.
