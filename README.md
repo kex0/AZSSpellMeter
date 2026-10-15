@@ -28,14 +28,22 @@ Drag the bronze title bar to move the window. Drag the corner to resize it. If t
 
 | Command | |
 |---|---|
-| `/azsm` | Show or hide |
+| `/azsm` | Show or hide. If the window is off screen, this brings it back |
 | `/azsm reset` | Start this window over |
+| `/azsm resetpos` | Put the window back on screen |
 | `/azsm lock` | Lock or unlock dragging |
 | `/spellmeter` | Same as `/azsm` |
 
 While this window is open, the built-in Damage Done meter is hidden. Hiding this addon puts it back, if it was on before.
 
+The window position is remembered across updates. Deleting the addon folder does not clear it. If the window is missing, type `/azsm resetpos`.
+
 ## Changelog
+
+### 1.19
+
+- The window stays on screen. A position saved off screen is moved back on login.
+- `/azsm resetpos` puts the window back in the top-left without wiping the meter.
 
 ### 1.18
 

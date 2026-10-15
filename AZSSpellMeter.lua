@@ -50,6 +50,9 @@ local castHeld = false
 local lastW, lastH
 local sizing = false
 local sizeX, sizeY, sizeW, sizeH
+local dragging = false
+local toldClamp = false
+local toldHidden = false
 
 local function say(text)
 	if DEFAULT_CHAT_FRAME then
@@ -1267,6 +1270,71 @@ local function savePoint()
 	cfg.y = y
 end
 
+-- StartMoving does not stop at the screen edge on this client, and the saved
+-- position survives a reinstall. Pull a frame back so its top-left stays on screen.
+local function clampIntoView(target, keepX, keepY)
+	if not target or not target.GetLeft or not target:IsShown() then
+		return false
+	end
+	local left = target:GetLeft()
+	local top = target:GetTop()
+	local right = target:GetRight()
+	local bottom = target:GetBottom()
+	if not left or not top or not right or not bottom then
+		return false
+	end
+	local w = right - left
+	local h = top - bottom
+	if w < 8 or h < 8 then
+		return false
+	end
+	local sw, sh = 0, 0
+	if UIParent then
+		sw = UIParent:GetWidth() or 0
+		sh = UIParent:GetHeight() or 0
+	end
+	if sw < 100 or sh < 100 then
+		return false
+	end
+	if not keepX or keepX < 32 then
+		keepX = 32
+	end
+	if keepX > sw then
+		keepX = sw
+	end
+	if not keepY or keepY < 12 then
+		keepY = 12
+	end
+	if keepY > sh then
+		keepY = sh
+	end
+	local nl, nt = left, top
+	if left < -2 then
+		nl = 0
+	elseif left > sw - keepX + 2 then
+		nl = sw - keepX
+	end
+	if top > sh + 2 then
+		nt = sh
+	elseif top < keepY - 2 then
+		nt = keepY
+	end
+	if nl == left and nt == top then
+		return false
+	end
+	target:ClearAllPoints()
+	target:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", nl, nt)
+	return true
+end
+
+local function noteClamped()
+	if toldClamp then
+		return
+	end
+	toldClamp = true
+	say("The window was off the screen, so it was moved back. /azsm resetpos does this on purpose.")
+end
+
 local function uiScale()
 	local s = 1
 	if UIParent and UIParent.GetEffectiveScale then
@@ -1311,6 +1379,29 @@ local function applyShown()
 		end
 		frame:Show()
 	end
+end
+
+local function placeDefault()
+	local cfg = config()
+	cfg.point = "TOPLEFT"
+	cfg.rel = "TOPLEFT"
+	cfg.x = 16
+	cfg.y = -160
+	cfg.shown = true
+	cfg.mini = false
+	if not frame then
+		return
+	end
+	frame:ClearAllPoints()
+	frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -160)
+	if bubble then
+		bubble.parked = false
+		bubble:ClearAllPoints()
+		bubble:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+	end
+	applyShown()
+	refresh()
+	say("Window moved back on screen.")
 end
 
 local function face(fs, size)
@@ -1656,11 +1747,16 @@ local function createUI()
 	header:RegisterForDrag("LeftButton")
 	header:SetScript("OnDragStart", function()
 		if not config().locked then
+			dragging = true
 			frame:StartMoving()
 		end
 	end)
 	header:SetScript("OnDragStop", function()
+		dragging = false
 		frame:StopMovingOrSizing()
+		if clampIntoView(frame, 120, 20) then
+			noteClamped()
+		end
 		savePoint()
 	end)
 
@@ -1938,6 +2034,9 @@ local function createUI()
 		if frame.SetClampedToScreen then
 			frame:SetClampedToScreen(true)
 		end
+		if clampIntoView(frame, 120, 20) then
+			noteClamped()
+		end
 		local saved = config()
 		saved.width = frame:GetWidth()
 		saved.height = frame:GetHeight()
@@ -2067,6 +2166,15 @@ local function createUI()
 				frame:SetHeight(h)
 			end
 		end
+		if sizing or dragging or not frame:IsShown() then
+			frame.clampWait = 0
+		else
+			frame.clampWait = (frame.clampWait or 0) + (arg1 or 0)
+			if frame.clampWait >= 0.2 and clampIntoView(frame, 120, 20) then
+				savePoint()
+				noteClamped()
+			end
+		end
 		local now = GetTime()
 		if scanAt > 0 and now >= scanAt then
 			scanAt = 0
@@ -2131,6 +2239,9 @@ local function createUI()
 	end)
 	bubble:SetScript("OnDragStop", function()
 		bubble:StopMovingOrSizing()
+		if clampIntoView(bubble, 36, 18) then
+			noteClamped()
+		end
 	end)
 	bubble:SetScript("OnClick", function()
 		if bubbleDrag then
@@ -2158,6 +2269,10 @@ local function createUI()
 				bubble.measuring = true
 				return
 			end
+			if clampIntoView(frame, 120, 20) then
+				savePoint()
+				noteClamped()
+			end
 			local x, y = minBtn:GetCenter()
 			frame:Hide()
 			bubble.measuring = nil
@@ -2166,6 +2281,9 @@ local function createUI()
 				bubble:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
 				bubble.parked = true
 			end
+		end
+		if config().mini and bubble.parked and not bubbleDrag and clampIntoView(bubble, 36, 18) then
+			noteClamped()
 		end
 		if not config().mini then
 			return
@@ -2179,6 +2297,10 @@ local function createUI()
 	bubble:Hide()
 
 	applyShown()
+	if config().shown == false and not toldHidden then
+		toldHidden = true
+		say("The window is hidden. Type /azsm to show it.")
+	end
 end
 
 local function onCreatureDeath(msg)
@@ -2204,6 +2326,12 @@ local function onEvent()
 		widenCombatLog()
 		queueScan()
 		return
+	end
+	if not frame and event == "PLAYER_ENTERING_WORLD" then
+		loadState()
+		createUI()
+		widenCombatLog()
+		queueScan()
 	end
 	if not state then
 		return
@@ -2347,8 +2475,15 @@ SlashCmdList["AZSSPELLMETER"] = function(msg)
 		say("Still loading.")
 		return
 	end
-	if msg == "" or msg == "toggle" or msg == "show" then
-		if msg == "show" then
+	if msg == "resetpos" then
+		placeDefault()
+	elseif msg == "" or msg == "toggle" or msg == "show" then
+		if msg ~= "show" and frame:IsShown() and clampIntoView(frame, 120, 20) then
+			savePoint()
+			noteClamped()
+		elseif msg ~= "show" and bubble and bubble:IsShown() and clampIntoView(bubble, 36, 18) then
+			noteClamped()
+		elseif msg == "show" then
 			config().shown = true
 			config().mini = false
 			applyShown()
@@ -2390,6 +2525,6 @@ SlashCmdList["AZSSPELLMETER"] = function(msg)
 			say(lastRaw)
 		end
 	else
-		say("/azsm show, hide, reset, lock, test, debug")
+		say("/azsm show, hide, reset, resetpos, lock, test, debug")
 	end
 end

@@ -2,7 +2,7 @@
 ## Title: AZS Spell Meter
 ## Notes: Per-spell damage and DPS for Azeroth Survivors
 ## SavedVariables: AZSSpellMeterDB
-## Version: 1.18
+## Version: 1.19
 
 Icons.lua
 AZSSpellMeter.lua

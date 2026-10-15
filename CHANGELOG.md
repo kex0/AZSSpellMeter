@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.19
+
+- The window can no longer be left off the screen. If a saved position is already off screen, it is moved back on login.
+- `/azsm resetpos` puts the window back in the top-left. Reinstalling the addon does not clear a saved position, so use this instead of deleting the saved file.
+
 ## 1.18
 
 - Fixed the chat error that appeared while the meter looked up spell icons. Relog to load it.
