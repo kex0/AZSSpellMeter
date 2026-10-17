@@ -20,11 +20,13 @@ The built-in meter is the right tally. This one reads those same numbers and add
 2. Put this folder there, so the path ends in `AddOns/AZSSpellMeter/AZSSpellMeter.toc`.
 3. Relog. Addons only load at login.
 
-Requires Azeroth Survivors 0.87 or newer, for `AZS_GetMeter`.
+Requires Azeroth Survivors 0.87 or newer, for `AZS_GetMeter`. Healing, Boss, and Taken need a current game build.
 
 ## Use
 
 Drag the bronze title bar to move the window. Drag the corner to resize it. If the list is longer than the window, the last spell sits partly in view. Scroll with the mouse wheel.
+
+Damage, Healing, Boss, and Taken are the buttons under the title. Damage includes kills per spell. Healing is health actually restored. Boss is the last boss fight, and it stays up until the next boss. Taken is the damage you took, split by what hit you. A thin bar under a spell icon is its cooldown. Hover the total for your build stats.
 
 | Command | |
 |---|---|
@@ -39,6 +41,16 @@ While this window is open, the built-in Damage Done meter is hidden. Hiding this
 The window position is remembered across updates. Deleting the addon folder does not clear it. If the window is missing, type `/azsm resetpos`.
 
 ## Changelog
+
+### 1.20
+
+- Damage, Healing, Boss, and Taken are the buttons under the title. Damage stays selected until you pick another.
+- Healing matches Healing Done. Kills keep counting, and they are not listed on that view.
+- Boss matches the last boss fight. The kills column is hidden there too.
+- Taken splits damage you took by source. On death, one chat line names the biggest source.
+- Reset clears only the view you are looking at.
+- The title shows your class. Spell cooldowns sit under the icon, and the total's tooltip lists your build.
+- Leech, items, and the Taken rows have their own icons.
 
 ### 1.19
 

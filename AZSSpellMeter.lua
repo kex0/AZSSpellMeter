@@ -1,8 +1,10 @@
 -- Per-spell damage for Azeroth Survivors (benilla, interface 1.12).
--- Damage, share, and DPS come from the run's own meter (AZS_GetMeter).
--- Reset remembers those numbers and shows only what the meter adds afterwards.
--- Healing and boss damage are not on the addon feed, so this window is damage only.
--- Kills are still credited from the combat log, by the last spell to hit that name.
+-- Damage, healing, and boss damage come from the game's own meters.
+-- Damage taken is the game's taken list, by source.
+-- A thin bar on a row is that spell's cooldown. The total's tooltip lists build stats.
+-- Reset remembers the numbers for the view you are on and shows only what it adds afterwards.
+-- Kills are credited from the combat log on the damage view. They keep counting
+-- while another view is open, and they are not drawn there.
 -- A proc is grouped onto the spell it casts (Pyroclasm onto Blast Wave). The row
 -- is that spell; the proc's own numbers are on its button.
 -- Rows sit in a scroll frame at a fixed height. The frame clips whatever does not
@@ -14,11 +16,45 @@ local ROW_POOL = 25
 local ROW_H = 16
 local SOLID = "Interface\\Buttons\\WHITE8X8"
 local WIDTH = 348
-local HEADER = 32
+local TITLE_H = 18
+local MODE_H = 16
+local COL_H = 12
+local HEADER = 51
 local BOTTOM = 8
 local COL_KILL = 40
 local COL_DMG = 50
 local COL_DPS = 36
+
+local CLASS_SHEET = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+local CLASS_ICON = {
+	warrior = { 0, 0.25, 0, 0.25 },
+	mage = { 0.25, 0.49609375, 0, 0.25 },
+	rogue = { 0.49609375, 0.7421875, 0, 0.25 },
+	druid = { 0.7421875, 0.98828125, 0, 0.25 },
+	hunter = { 0, 0.25, 0.25, 0.5 },
+	shaman = { 0.25, 0.49609375, 0.25, 0.5 },
+	priest = { 0.49609375, 0.7421875, 0.25, 0.5 },
+	warlock = { 0.7421875, 0.98828125, 0.25, 0.5 },
+	paladin = { 0, 0.25, 0.5, 0.75 },
+}
+
+local TAKEN_LABEL = {
+	["boss melee"] = "Boss melee",
+	["boss spell"] = "Boss spells",
+	["elite"] = "Elites",
+	["mob melee"] = "Mob melee",
+	["mob spell"] = "Mob spells",
+	["area"] = "Ground",
+}
+local TAKEN_ICON = {
+	["boss melee"] = "Interface\\Icons\\Ability_Warrior_SavageBlow",
+	["boss spell"] = "Interface\\Icons\\Spell_Shadow_ShadowBolt",
+	["elite"] = "Interface\\Icons\\Ability_Creature_Cursed_01",
+	["mob melee"] = "Interface\\Icons\\INV_Sword_04",
+	["mob spell"] = "Interface\\Icons\\Spell_Nature_Lightning",
+	["area"] = "Interface\\Icons\\Spell_Fire_Fire",
+}
+local seenPhase
 
 local frame
 local bubble
@@ -503,6 +539,15 @@ local function resetData()
 	state.base = nil
 	state.baseTotal = nil
 	state.baseTime = nil
+	state.healBase = nil
+	state.healBaseTotal = nil
+	state.healBaseTime = nil
+	state.bossBase = nil
+	state.bossBaseTotal = nil
+	state.bossBaseTime = nil
+	state.takenBase = nil
+	state.takenBaseTotal = nil
+	state.takenBaseTime = nil
 	local level = UnitLevel("player")
 	if level and level > 0 then
 		state.level = level
@@ -551,9 +596,24 @@ local function checkLevel()
 	state.level = level
 end
 
+local function asTexture(texture)
+	if not texture or texture == "" then
+		return nil
+	end
+	if string.find(texture, "\\", 1, true) or string.find(texture, "/", 1, true) then
+		return texture
+	end
+	local head = string.sub(texture, 1, 4)
+	if head == "INV_" or head == "Spel" or head == "Abil" or head == "Trad" then
+		return "Interface\\Icons\\" .. texture
+	end
+	return nil
+end
+
 local function rememberIcon(name, texture)
-	if name and texture and name ~= "" and texture ~= "" then
-		icons[name] = texture
+	local path = asTexture(texture)
+	if name and path and name ~= "" then
+		icons[name] = path
 	end
 end
 
@@ -585,6 +645,8 @@ local EXTRA_ICONS = {
 	["Shadowy Apparitions"] = "Spell_Shadow_Haunting",
 	["Seed of Corruption"] = "Spell_Shadow_CurseOfMannoroth",
 	["Maelstrom Weapon"] = "Spell_Nature_Lightning",
+	["Leech"] = "Spell_Shadow_LifeDrain",
+	["Onyxia Tooth Pendant"] = "INV_Jewelry_Necklace_09",
 }
 
 local function iconLookup(name)
@@ -607,6 +669,22 @@ local function iconLookup(name)
 	return QUESTION
 end
 
+local itemMiss = {}
+
+local function itemIcon(name)
+	if not name or name == "" or itemMiss[name] or not GetItemInfo then
+		return nil
+	end
+	itemMiss[name] = true
+	local _, _, _, _, _, _, _, _, ninth, tenth = GetItemInfo(name)
+	local path = asTexture(tenth) or asTexture(ninth)
+	if path then
+		icons[name] = path
+		return path
+	end
+	return nil
+end
+
 local function iconFor(name)
 	local tex = iconLookup(name)
 	if tex ~= QUESTION then
@@ -619,7 +697,71 @@ local function iconFor(name)
 			return via
 		end
 	end
+	local fromItem = itemIcon(name)
+	if fromItem then
+		return fromItem
+	end
 	return QUESTION
+end
+
+local function rowIcon(data)
+	if data and data.iconPath and data.iconPath ~= "" then
+		return data.iconPath
+	end
+	return iconFor(data and data.name)
+end
+
+local function noteItemText(msg)
+	if not msg or not GetItemInfo or not string.find(msg, "|Hitem:", 1, true) then
+		return
+	end
+	local start = 1
+	while true do
+		local s, e, body, shown = string.find(msg, "|Hitem:([^|]+)|h%[(.-)%]|h", start)
+		if not s then
+			break
+		end
+		local _, _, _, _, _, _, _, _, _, tex = GetItemInfo("item:" .. body)
+		local path = asTexture(tex)
+		if not path then
+			local _, _, _, _, _, _, _, _, ninth, tenth = GetItemInfo(body)
+			path = asTexture(tenth) or asTexture(ninth)
+		end
+		if path and shown and shown ~= "" then
+			icons[shown] = path
+		end
+		start = e + 1
+	end
+end
+
+local function scanCarriedItems()
+	itemMiss = {}
+	if GetInventoryItemLink and GetInventoryItemTexture then
+		local slot
+		for slot = 1, 19 do
+			local link = GetInventoryItemLink("player", slot)
+			local tex = GetInventoryItemTexture("player", slot)
+			if link and tex then
+				local _, _, name = string.find(link, "%[(.+)%]")
+				rememberIcon(name, tex)
+			end
+		end
+	end
+	if GetContainerNumSlots and GetContainerItemLink and GetContainerItemInfo then
+		local bag
+		for bag = 0, 4 do
+			local n = GetContainerNumSlots(bag) or 0
+			local slot
+			for slot = 1, n do
+				local link = GetContainerItemLink(bag, slot)
+				local tex = GetContainerItemInfo(bag, slot)
+				if link and tex then
+					local _, _, name = string.find(link, "%[(.+)%]")
+					rememberIcon(name, tex)
+				end
+			end
+		end
+	end
 end
 
 local function castList(name)
@@ -668,6 +810,7 @@ local function scanIcons()
 			i = i + 1
 		end
 	end
+	scanCarriedItems()
 	local tip = actionTip()
 	if not tip or not HasAction or not GetActionTexture then
 		return
@@ -727,9 +870,9 @@ end
 
 local function rowWidth()
 	if not frame then
-		return WIDTH - 12
+		return WIDTH - 16
 	end
-	local w = frame:GetWidth() - 12
+	local w = frame:GetWidth() - 16
 	if w < 40 then
 		w = 40
 	end
@@ -766,13 +909,22 @@ local function watchRun()
 	if not t then
 		return
 	end
-	if runSeen and t + 1 < runSeen and ((state.kills or 0) > 0 or state.base) then
+	if runSeen and t + 1 < runSeen and ((state.kills or 0) > 0 or state.base or state.healBase or state.bossBase or state.takenBase) then
 		state.spells = {}
 		state.kills = 0
 		lastBlow = {}
 		state.base = nil
 		state.baseTotal = nil
 		state.baseTime = nil
+		state.healBase = nil
+		state.healBaseTotal = nil
+		state.healBaseTime = nil
+		state.bossBase = nil
+		state.bossBaseTotal = nil
+		state.bossBaseTime = nil
+		state.takenBase = nil
+		state.takenBaseTotal = nil
+		state.takenBaseTime = nil
 		say("New run.")
 	end
 	runSeen = t
@@ -814,12 +966,86 @@ local function meterFrom(list)
 	return list, total, dps
 end
 
+local function viewMode()
+	local cfg = config()
+	if not cfg.viewChosen then
+		cfg.view = "damage"
+	end
+	local v = cfg.view
+	if v ~= "healing" and v ~= "boss" and v ~= "taken" then
+		return "damage"
+	end
+	return v
+end
+
+local function showsKills()
+	return viewMode() == "damage"
+end
+
+-- Amount word, rate word, and whether the kill tally belongs on this view.
+local function meterWords()
+	local mode = viewMode()
+	if mode == "healing" then
+		return "Healing", "HPS", false
+	elseif mode == "taken" then
+		return "Taken", "DPS", false
+	end
+	return "Damage", "DPS", mode == "damage"
+end
+
+local function baseFields()
+	local mode = viewMode()
+	if mode == "healing" then
+		return "healBase", "healBaseTotal", "healBaseTime"
+	elseif mode == "boss" then
+		return "bossBase", "bossBaseTotal", "bossBaseTime"
+	elseif mode == "taken" then
+		return "takenBase", "takenBaseTotal", "takenBaseTime"
+	end
+	return "base", "baseTotal", "baseTime"
+end
+
 local function pullMeter()
-	if testMeter then
+	local mode = viewMode()
+	if mode == "damage" and testMeter then
 		return meterFrom(testMeter)
 	end
-	if AZS_GetMeter then
-		return AZS_GetMeter()
+	local fn = AZS_GetMeter
+	if mode == "healing" then
+		fn = AZS_GetHealing
+	elseif mode == "boss" then
+		fn = AZS_GetBossMeter
+	elseif mode == "taken" then
+		local lines = {}
+		local total = 0
+		local t = runNow()
+		if t < 1 then
+			t = 1
+		end
+		if AZS_TAKEN then
+			local i
+			local n = table.getn(AZS_TAKEN)
+			for i = 1, n do
+				local src = AZS_TAKEN[i].source or ""
+				local dmg = tonumber(AZS_TAKEN[i].dmg) or 0
+				total = total + dmg
+				lines[i] = {
+					name = TAKEN_LABEL[src] or src,
+					dmg = dmg,
+					dps = dmg / t,
+					proc = 0,
+					icon = TAKEN_ICON[src],
+				}
+			end
+		end
+		local dps = 0
+		if total > 0 then
+			dps = total / t
+		end
+		return lines, total, dps
+	end
+	if fn then
+		return fn()
 	end
 	return {}, 0, 0
 end
@@ -842,9 +1068,10 @@ local function captureBase()
 			end
 		end
 	end
-	state.base = base
-	state.baseTotal = tonumber(total) or 0
-	state.baseTime = runNow()
+	local bKey, tKey, timeKey = baseFields()
+	state[bKey] = base
+	state[tKey] = tonumber(total) or 0
+	state[timeKey] = runNow()
 end
 
 local function windowReset(dropTest)
@@ -855,9 +1082,11 @@ local function windowReset(dropTest)
 		testMeter = nil
 	end
 	captureBase()
-	state.spells = {}
-	state.kills = 0
-	lastBlow = {}
+	if showsKills() then
+		state.spells = {}
+		state.kills = 0
+		lastBlow = {}
+	end
 	scroll = 0
 end
 
@@ -896,18 +1125,21 @@ local function rebuild()
 	end
 	local lines, total, rdps = pullMeter()
 	local gameTotal = tonumber(total) or 0
-	if state.base and gameTotal + 1 < (state.baseTotal or 0) then
-		state.base = nil
-		state.baseTotal = nil
-		state.baseTime = nil
+	local bKey, tKey, timeKey = baseFields()
+	local baseMap = state[bKey]
+	if baseMap and gameTotal + 1 < (state[tKey] or 0) then
+		state[bKey] = nil
+		state[tKey] = nil
+		state[timeKey] = nil
+		baseMap = nil
 	end
 	local since = 1
-	if state.base then
-		since = runNow() - (state.baseTime or 0)
+	if baseMap then
+		since = runNow() - (state[timeKey] or 0)
 		if since < 1 then
 			since = 1
 		end
-		meterTotal = gameTotal - (state.baseTotal or 0)
+		meterTotal = gameTotal - (state[tKey] or 0)
 		if meterTotal < 0 then
 			meterTotal = 0
 		end
@@ -946,8 +1178,8 @@ local function rebuild()
 				local row = bucketOf(name)
 				local raw = tonumber(line.dmg) or 0
 				local dealt = raw
-				if state.base then
-					dealt = raw - (state.base[name] or 0)
+				if baseMap then
+					dealt = raw - (baseMap[name] or 0)
 					if dealt < 0 then
 						dealt = 0
 					end
@@ -958,13 +1190,16 @@ local function rebuild()
 				row.damage = dealt
 				row.proc = isProc(line.proc)
 				row.fromMeter = true
+				row.iconPath = line.icon
 			end
 		end
 	end
-	local spellName, rec
-	for spellName, rec in pairs(state.spells) do
-		if (rec.kills or 0) > 0 then
-			bucketOf(spellName)
+	if showsKills() then
+		local spellName, rec
+		for spellName, rec in pairs(state.spells) do
+			if (rec.kills or 0) > 0 then
+				bucketOf(spellName)
+			end
 		end
 	end
 	-- Fold a proc into the spell it actually casts: one Blast Wave row, and
@@ -989,7 +1224,7 @@ local function rebuild()
 			parent.damage = (parent.damage or 0) + (row.damage or 0)
 			parent.dps = (parent.dps or 0) + (row.dps or 0)
 			parent.kills = (parent.kills or 0) + (row.kills or 0)
-			if (row.damage or 0) > 0 or (row.kills or 0) > 0 then
+			if (row.damage or 0) > 0 or (showsKills() and (row.kills or 0) > 0) then
 				if not parent.procs then
 					parent.procs = {}
 				end
@@ -1007,7 +1242,10 @@ local function rebuild()
 	local n = 0
 	local name, entry
 	for name, entry in pairs(bucket) do
-		local keep = (entry.damage or 0) > 0 or (entry.kills or 0) > 0
+		local keep = (entry.damage or 0) > 0
+		if showsKills() and (entry.kills or 0) > 0 then
+			keep = true
+		end
 		if not keep and entry.procs and table.getn(entry.procs) > 0 then
 			keep = true
 		end
@@ -1020,7 +1258,7 @@ local function rebuild()
 		end
 	end
 	local key = config().sort or "damage"
-	if key == "name" or key == "share" then
+	if key == "name" or key == "share" or (key == "kills" and not showsKills()) then
 		key = "damage"
 	end
 	local desc = config().sortDir ~= "asc"
@@ -1050,11 +1288,41 @@ local function rebuild()
 	return n
 end
 
+local function noteDeath()
+	if not AZS_GetPhase then
+		return
+	end
+	local ph = AZS_GetPhase()
+	if ph == "dead" and seenPhase ~= "dead" and AZS_TAKEN then
+		local bestName = nil
+		local best = 0
+		local i
+		for i = 1, table.getn(AZS_TAKEN) do
+			local dmg = tonumber(AZS_TAKEN[i].dmg) or 0
+			if dmg > best then
+				best = dmg
+				local src = AZS_TAKEN[i].source or ""
+				bestName = TAKEN_LABEL[src] or src
+			end
+		end
+		if bestName and best > 0 then
+			say("Downed mostly by " .. bestName .. ", " .. comma(best) .. ". The Taken tab has the rest.")
+		end
+	end
+	seenPhase = ph
+end
+
+local function compactKey(name)
+	local s = string.lower(name or "")
+	s = string.gsub(s, "[%s_%-']", "")
+	return s
+end
+
 -- Pixel height of the list. Not snapped to a row, so the scroll frame can cut a spell in half.
 local function viewHeight()
 	local avail = 8 * ROW_H
 	if frame then
-		avail = frame:GetHeight() - HEADER - 6
+		avail = frame:GetHeight() - HEADER - 10
 	end
 	if avail < 8 then
 		avail = 8
@@ -1067,6 +1335,7 @@ local function refresh()
 		return
 	end
 	watchRun()
+	noteDeath()
 	if frame:IsShown() or (bubble and bubble:IsShown()) then
 		hideStockMeter()
 	end
@@ -1100,6 +1369,15 @@ local function refresh()
 		end
 	end
 	if frame.scroll then
+		local top = HEADER
+		frame.scroll:ClearAllPoints()
+		frame.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -top)
+		frame.scroll:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -top)
+		if frame.cols then
+			frame.cols:ClearAllPoints()
+			frame.cols:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -(top - COL_H))
+			frame.cols:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(top - COL_H))
+		end
 		frame.scroll:SetHeight(viewH)
 		local sw = frame.scroll:GetWidth()
 		if not sw or sw < 40 then
@@ -1121,18 +1399,84 @@ local function refresh()
 		end
 	end
 
+	local mode = viewMode()
+	local amountWord, rateWord, killView = meterWords()
 	local board = meterTotal
 	local dps = meterDps
 	if frame.emptyText then
 		if n <= 0 then
-			frame.emptyText:SetText("No damage yet.")
+			local empty = "No damage yet."
+			if mode == "healing" then
+				if AZS_GetHealing then
+					empty = "No healing yet."
+				else
+					empty = "Healing needs a newer game build."
+				end
+			elseif mode == "boss" then
+				if AZS_GetBossMeter then
+					empty = "No boss damage yet."
+				else
+					empty = "Boss damage needs a newer game build."
+				end
+			elseif mode == "taken" then
+				if AZS_TAKEN then
+					empty = "No damage taken yet."
+				else
+					empty = "Damage taken needs a newer game build."
+				end
+			end
+			frame.emptyText:SetText(empty)
+			frame.emptyText:ClearAllPoints()
+			frame.emptyText:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -(HEADER + 6))
 			frame.emptyText:Show()
 		else
 			frame.emptyText:Hide()
 		end
 	end
 	frame.totalText:SetText(comma(board))
-	frame.dpsText:SetText(fmtRate(dps) .. " dps")
+	if frame.brandText then
+		local title = "Spell Meter"
+		local classKey = ""
+		local className = ""
+		if AZS_ZONE then
+			classKey = AZS_ZONE.class or ""
+			className = AZS_ZONE.cname or ""
+		end
+		if className == "" and UnitClass then
+			local localized, english = UnitClass("player")
+			if localized and localized ~= "" then
+				className = localized
+			end
+			if classKey == "" and english and english ~= "" then
+				classKey = string.lower(english)
+			end
+		end
+		if className ~= "" then
+			title = className
+		end
+		frame.brandText:SetText(title)
+		frame.brandText:SetTextColor(1, 0.9, 0.62)
+		if frame.brand then
+			local coord = CLASS_ICON[classKey]
+			if coord then
+				frame.brand:SetTexture(CLASS_SHEET)
+				frame.brand:SetTexCoord(coord[1], coord[2], coord[3], coord[4])
+			else
+				frame.brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+				frame.brand:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+			end
+		end
+	end
+	if mode == "healing" then
+		frame.totalText:SetTextColor(0.72, 0.95, 0.7)
+	elseif mode == "boss" then
+		frame.totalText:SetTextColor(1, 0.72, 0.42)
+	elseif mode == "taken" then
+		frame.totalText:SetTextColor(1, 0.55, 0.45)
+	else
+		frame.totalText:SetTextColor(1, 0.9, 0.55)
+	end
+	frame.dpsText:SetText(fmtRate(dps) .. " " .. string.lower(rateWord))
 	if frame.bubbleText then
 		frame.bubbleText:SetText(comma(board))
 		local bw = 36
@@ -1160,8 +1504,26 @@ local function refresh()
 	end
 	if frame.sortBtns then
 		local active = config().sort or "damage"
-		if active == "name" then
+		if active == "name" or active == "share" or (active == "kills" and not killView) then
 			active = "damage"
+		end
+		if frame.dmgCol then
+			frame.dmgCol.base = amountWord
+			if mode == "healing" then
+				frame.dmgCol:SetWidth(58)
+			else
+				frame.dmgCol:SetWidth(COL_DMG)
+			end
+		end
+		if frame.dpsCol then
+			frame.dpsCol.base = rateWord
+		end
+		if frame.killCol then
+			if killView then
+				frame.killCol:Show()
+			else
+				frame.killCol:Hide()
+			end
 		end
 		local si
 		for si = 1, table.getn(frame.sortBtns) do
@@ -1174,10 +1536,69 @@ local function refresh()
 			end
 		end
 	end
-	if (state.kills or 0) > 0 then
+	if frame.modeBtns then
+		local mi
+		for mi = 1, table.getn(frame.modeBtns) do
+			local btn = frame.modeBtns[mi]
+			local on = btn.mode == mode
+			if on then
+				btn.label:SetTextColor(btn.tr, btn.tg, btn.tb)
+				btn:SetBackdropColor(btn.br, btn.bg, btn.bb, 0.92)
+				btn:SetBackdropBorderColor(btn.er, btn.eg, btn.eb, 1)
+			else
+				btn.label:SetTextColor(0.62, 0.54, 0.4)
+				btn:SetBackdropColor(0.12, 0.08, 0.04, 0.55)
+				btn:SetBackdropBorderColor(0.32, 0.22, 0.1, 1)
+			end
+		end
+		local gap = 3
+		local inner = 0
+		if frame.modes and frame.modes.GetWidth then
+			inner = frame.modes:GetWidth() or 0
+		end
+		if inner < 40 then
+			inner = (frame:GetWidth() or WIDTH) - 16
+		end
+		local tabs = 4
+		if frame.modeBtns then
+			tabs = table.getn(frame.modeBtns)
+		end
+		if tabs < 1 then
+			tabs = 1
+		end
+		local bw = math.floor((inner - gap * (tabs - 1)) / tabs)
+		if bw < 8 then
+			bw = 8
+		end
+		local used = bw * tabs + gap * (tabs - 1)
+		local shift = math.floor((inner - used) / 2)
+		if shift < 0 then
+			shift = 0
+		end
+		for mi = 1, table.getn(frame.modeBtns) do
+			local btn = frame.modeBtns[mi]
+			btn:ClearAllPoints()
+			btn:SetWidth(bw)
+			if frame.modes then
+				btn:SetPoint("LEFT", frame.modes, "LEFT", shift + (mi - 1) * (bw + gap), 0)
+			end
+		end
+	end
+	if killView and (state.kills or 0) > 0 then
 		frame.countText:SetText(state.kills .. (state.kills == 1 and " kill" or " kills"))
 	else
 		frame.countText:SetText("")
+	end
+
+	frame.cdMap = {}
+	if AZS_SPELLS then
+		local si
+		for si = 1, table.getn(AZS_SPELLS) do
+			local sp = AZS_SPELLS[si]
+			if sp.key and sp.key ~= "" then
+				frame.cdMap[compactKey(sp.key)] = sp
+			end
+		end
 	end
 
 	local i
@@ -1197,21 +1618,63 @@ local function refresh()
 			row.data = data
 			row:Show()
 			row:SetWidth(rowWidth())
-			row.icon:SetTexture(iconFor(data.name))
+			row.icon:SetTexture(rowIcon(data))
 			row.name:SetText(string.format("%d  %s", first + i, label))
-			if (data.kills or 0) > 0 then
+			if killView and (data.kills or 0) > 0 then
 				row.kills:SetText(tostring(data.kills))
 			else
 				row.kills:SetText("")
 			end
+			row.kills:ClearAllPoints()
+			row.damage:ClearAllPoints()
+			row.rate:ClearAllPoints()
+			row.name:ClearAllPoints()
+			row.rate:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+			row.damage:SetPoint("RIGHT", row.rate, "LEFT", -6, 0)
+			row.name:SetPoint("LEFT", row, "LEFT", 16, 0)
+			if killView then
+				row.kills:Show()
+				row.kills:SetPoint("RIGHT", row.damage, "LEFT", -6, 0)
+				row.name:SetPoint("RIGHT", row.kills, "LEFT", -4, 0)
+			else
+				row.kills:Hide()
+				row.name:SetPoint("RIGHT", row.damage, "LEFT", -4, 0)
+			end
 			row.damage:SetText(comma(dealt))
+			if mode == "healing" then
+				row.damage:SetTextColor(0.72, 0.95, 0.7)
+			elseif mode == "boss" then
+				row.damage:SetTextColor(1, 0.78, 0.5)
+			elseif mode == "taken" then
+				row.damage:SetTextColor(1, 0.55, 0.45)
+			else
+				row.damage:SetTextColor(1, 0.9, 0.55)
+			end
 			row.rate:SetText(fmtRate(data.dps or 0))
 			local fill = share
 			if dealt > 0 and fill < 0.015 then
 				fill = 0.015
 			end
 			row.bar:SetWidth(math.max(2, (row:GetWidth() or 1) * fill))
-			if first + i == 1 then
+			if mode == "healing" then
+				if first + i == 1 then
+					row.bar:SetVertexColor(0.22, 0.58, 0.3, 0.9)
+				else
+					row.bar:SetVertexColor(0.1, 0.28, 0.14, 0.75)
+				end
+			elseif mode == "boss" then
+				if first + i == 1 then
+					row.bar:SetVertexColor(0.78, 0.28, 0.1, 0.9)
+				else
+					row.bar:SetVertexColor(0.4, 0.14, 0.06, 0.75)
+				end
+			elseif mode == "taken" then
+				if first + i == 1 then
+					row.bar:SetVertexColor(0.72, 0.22, 0.16, 0.9)
+				else
+					row.bar:SetVertexColor(0.38, 0.12, 0.1, 0.75)
+				end
+			elseif first + i == 1 then
 				row.bar:SetVertexColor(0.82, 0.46, 0.12, 0.85)
 			else
 				row.bar:SetVertexColor(0.42, 0.2, 0.08, 0.75)
@@ -1222,7 +1685,11 @@ local function refresh()
 				textW = row.name:GetStringWidth() or 0
 			end
 			local px = 16 + textW + 4
-			local limit = (row:GetWidth() or 0) - (COL_KILL + COL_DMG + COL_DPS + 28)
+			local numW = COL_DMG + COL_DPS + 28
+			if killView then
+				numW = numW + COL_KILL
+			end
+			local limit = (row:GetWidth() or 0) - numW
 			if limit < 40 then
 				limit = 40
 			end
@@ -1235,6 +1702,9 @@ local function refresh()
 						px = limit
 					end
 					btn.info = info
+					if btn.icon then
+						btn.icon:SetTexture(iconFor(info.name))
+					end
 					btn:ClearAllPoints()
 					btn:SetPoint("LEFT", row, "LEFT", px, 0)
 					btn:Show()
@@ -1243,6 +1713,32 @@ local function refresh()
 					btn.info = nil
 					btn:Hide()
 				end
+			end
+			local cd = frame.cdMap and frame.cdMap[compactKey(data.name)]
+			if row.cd and cd and (tonumber(cd.cdmax) or 0) > 0 then
+				local maxc = tonumber(cd.cdmax) or 1
+				if maxc < 0.1 then
+					maxc = 0.1
+				end
+				local left = tonumber(cd.cd) or 0
+				if left < 0 then
+					left = 0
+				end
+				local frac = 1 - (left / maxc)
+				if frac < 0 then
+					frac = 0
+				elseif frac > 1 then
+					frac = 1
+				end
+				row.cd:Show()
+				row.cd:SetWidth(math.max(2, 11 * frac))
+				if left <= 0 then
+					row.cd:SetVertexColor(0.35, 0.95, 0.45, 1)
+				else
+					row.cd:SetVertexColor(0.95, 0.72, 0.25, 1)
+				end
+			elseif row.cd then
+				row.cd:Hide()
 			end
 		else
 			row.data = nil
@@ -1253,6 +1749,9 @@ local function refresh()
 					row.procBtns[pi].info = nil
 					row.procBtns[pi]:Hide()
 				end
+			end
+			if row.cd then
+				row.cd:Hide()
 			end
 		end
 	end
@@ -1420,6 +1919,22 @@ local function panelBackdrop()
 	}
 end
 
+local function roundBackdrop(edge)
+	local e = edge or 14
+	local inset = 4
+	if e < 12 then
+		inset = 2
+	end
+	return {
+		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+		tile = true,
+		tileSize = 16,
+		edgeSize = e,
+		insets = { left = inset, right = inset, top = inset, bottom = inset },
+	}
+end
+
 local tipFill
 local tipOwner
 
@@ -1504,11 +2019,11 @@ local function paintTip(title, icon, lines)
 	if lines then
 		count = table.getn(lines)
 	end
-	if count > 6 then
-		count = 6
+	if count > 8 then
+		count = 8
 	end
 	local i
-	for i = 1, 6 do
+	for i = 1, 8 do
 		local fs = tip.lines[i]
 		if i <= count then
 			local line = lines[i]
@@ -1557,7 +2072,7 @@ end
 
 local function createRow(parent, index)
 	local row = CreateFrame("Button", nil, parent)
-	row:SetWidth(WIDTH - 12)
+	row:SetWidth(WIDTH - 16)
 	row:SetHeight(ROW_H)
 	row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_H))
 
@@ -1589,6 +2104,14 @@ local function createRow(parent, index)
 	icon:SetPoint("CENTER", iconBg, "CENTER", 0, 0)
 	icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 	row.icon = icon
+
+	local cd = row:CreateTexture(nil, "OVERLAY")
+	cd:SetTexture(SOLID)
+	cd:SetWidth(11)
+	cd:SetHeight(2)
+	cd:SetPoint("BOTTOMLEFT", iconBg, "BOTTOMLEFT", 1, 0)
+	cd:Hide()
+	row.cd = cd
 
 	local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	name:SetPoint("LEFT", row, "LEFT", 16, 0)
@@ -1635,12 +2158,15 @@ local function createRow(parent, index)
 			if meterTotal > 0 then
 				share = (data.damage or 0) / meterTotal
 			end
+			local amountWord, rateWord, killView = meterWords()
 			local lines = {
-				{ string.format("Damage %s", comma(data.damage)), 1, 1, 1 },
+				{ string.format("%s %s", amountWord, comma(data.damage)), 1, 1, 1 },
 				{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
-				{ string.format("DPS %s", fmtRate(data.dps or 0)), 0.7, 0.92, 0.68 },
-				{ string.format("Kills %d", data.kills or 0), 1, 0.82, 0.45 },
+				{ string.format("%s %s", rateWord, fmtRate(data.dps or 0)), 0.7, 0.92, 0.68 },
 			}
+			if killView then
+				table.insert(lines, { string.format("Kills %d", data.kills or 0), 1, 0.82, 0.45 })
+			end
 			if data.procs and data.procs[1] then
 				local text = data.procs[1].name
 				local pi
@@ -1653,7 +2179,7 @@ local function createRow(parent, index)
 			elseif isProc(data.proc) then
 				table.insert(lines, { "Proc.", 0.7, 0.7, 0.7 })
 			end
-			paintTip(data.name, iconFor(data.name), lines)
+			paintTip(data.name, rowIcon(data), lines)
 		end)
 	end)
 	row:SetScript("OnLeave", function()
@@ -1664,18 +2190,17 @@ local function createRow(parent, index)
 	local pi
 	for pi = 1, 3 do
 		local btn = CreateFrame("Button", nil, row)
-		btn:SetWidth(30)
-		btn:SetHeight(12)
+		btn:SetWidth(14)
+		btn:SetHeight(14)
 		btn:SetFrameLevel((row:GetFrameLevel() or 1) + 2)
 		btn:SetBackdrop(panelBackdrop())
-		btn:SetBackdropColor(0.08, 0.16, 0.28, 0.95)
-		btn:SetBackdropBorderColor(0.35, 0.55, 0.82, 0.95)
-		local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		label:SetPoint("CENTER", btn, "CENTER", 0, 0)
-		label:SetText("proc")
-		face(label, 9)
-		label:SetTextColor(0.7, 0.86, 1)
-		btn.label = label
+		btn:SetBackdropColor(0, 0, 0, 1)
+		btn:SetBackdropBorderColor(0.45, 0.62, 0.9, 1)
+		local icon = btn:CreateTexture(nil, "ARTWORK")
+		icon:SetPoint("TOPLEFT", btn, "TOPLEFT", 1, -1)
+		icon:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
+		icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+		btn.icon = icon
 		btn:SetScript("OnEnter", function()
 			local owner = this
 			trackTip(owner, function()
@@ -1684,17 +2209,21 @@ local function createRow(parent, index)
 					hideTip()
 					return
 				end
+				local amountWord, rateWord, killView = meterWords()
 				local share = 0
 				if meterTotal > 0 then
 					share = (info.damage or 0) / meterTotal
 				end
-				paintTip(info.name, iconFor(info.name), {
-					{ string.format("Damage %s", comma(info.damage or 0)), 1, 1, 1 },
+				local lines = {
+					{ string.format("%s %s", amountWord, comma(info.damage or 0)), 1, 1, 1 },
 					{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
-					{ string.format("DPS %s", fmtRate(info.dps or 0)), 0.7, 0.92, 0.68 },
-					{ string.format("Kills %d", info.kills or 0), 1, 0.82, 0.45 },
-					{ "Proc.", 0.65, 0.78, 1 },
-				})
+					{ string.format("%s %s", rateWord, fmtRate(info.dps or 0)), 0.7, 0.92, 0.68 },
+				}
+				if killView then
+					table.insert(lines, { string.format("Kills %d", info.kills or 0), 1, 0.82, 0.45 })
+				end
+				table.insert(lines, { "Proc.", 0.65, 0.78, 1 })
+				paintTip(info.name, iconFor(info.name), lines)
 			end)
 			this:SetBackdropBorderColor(0.7, 0.86, 1, 1)
 		end)
@@ -1713,8 +2242,28 @@ end
 local function createUI()
 	frame = CreateFrame("Frame", "AZSSpellMeterFrame", UIParent)
 	local cfg = config()
+	local h = cfg.height or (HEADER + BOTTOM + 8 * ROW_H)
+	if not cfg.headerGrow then
+		if cfg.height then
+			h = cfg.height + MODE_H
+		end
+		cfg.headerGrow = 1
+		cfg.height = h
+	end
+	if cfg.colGrow and not cfg.colTight then
+		if cfg.height then
+			h = h - 8
+		end
+		cfg.height = h
+	end
+	cfg.colGrow = 1
+	cfg.colTight = 1
+	local minH = HEADER + BOTTOM + 3 * ROW_H
+	if h < minH then
+		h = minH
+	end
 	frame:SetWidth(cfg.width or WIDTH)
-	frame:SetHeight(cfg.height or (HEADER + BOTTOM + 8 * ROW_H))
+	frame:SetHeight(h)
 	frame:SetFrameStrata("HIGH")
 	frame:SetMovable(true)
 	frame:EnableMouse(true)
@@ -1731,19 +2280,19 @@ local function createUI()
 	if frame.SetClampedToScreen then
 		frame:SetClampedToScreen(true)
 	end
-	frame:SetBackdrop(panelBackdrop())
-	frame:SetBackdropColor(0.05, 0.045, 0.04, 0.94)
-	frame:SetBackdropBorderColor(0.58, 0.42, 0.16, 1)
+	frame:SetBackdrop(roundBackdrop(12))
+	frame:SetBackdropColor(0.05, 0.04, 0.03, 0.82)
+	frame:SetBackdropBorderColor(0.78, 0.58, 0.22, 1)
 
 	frame:SetPoint(cfg.point or "TOPLEFT", UIParent, cfg.rel or "TOPLEFT", cfg.x or 16, cfg.y or -160)
 
 	local header = CreateFrame("Button", nil, frame)
-	header:SetPoint("TOPLEFT", frame, "TOPLEFT", 1, -1)
-	header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -1, -1)
-	header:SetHeight(18)
+	header:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -6)
+	header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -6)
+	header:SetHeight(16)
 	header:SetBackdrop(panelBackdrop())
-	header:SetBackdropColor(0.34, 0.21, 0.06, 0.98)
-	header:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+	header:SetBackdropColor(0.34, 0.2, 0.06, 0.88)
+	header:SetBackdropBorderColor(0.72, 0.5, 0.16, 0.7)
 	header:RegisterForDrag("LeftButton")
 	header:SetScript("OnDragStart", function()
 		if not config().locked then
@@ -1760,34 +2309,89 @@ local function createUI()
 		savePoint()
 	end)
 
-	local titleBtn = CreateFrame("Button", nil, header)
-	titleBtn:SetPoint("LEFT", header, "LEFT", 6, 0)
-	titleBtn:SetHeight(16)
-	titleBtn:SetWidth(52)
-	local titleText = titleBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	titleText:SetPoint("LEFT", titleBtn, "LEFT", 0, 0)
-	titleText:SetText("Damage")
-	face(titleText, 11)
-	titleText:SetTextColor(1, 0.9, 0.62)
-	titleBtn:SetScript("OnEnter", function()
-		local tip = "Damage dealt this run, as the game counted it."
-		if state and state.base then
-			tip = "Damage since the last reset, still counted by the game."
-		end
-		showTip(this, "RIGHT", "Damage", nil, {
-			{ tip, 1, 1, 1 },
-		})
-	end)
-	titleBtn:SetScript("OnLeave", function()
-		leaveTip()
-	end)
+	local brandBack = header:CreateTexture(nil, "ARTWORK")
+	brandBack:SetTexture(SOLID)
+	brandBack:SetVertexColor(0, 0, 0, 0.55)
+	brandBack:SetWidth(14)
+	brandBack:SetHeight(14)
+	brandBack:SetPoint("LEFT", header, "LEFT", 2, 0)
+	local brand = header:CreateTexture(nil, "OVERLAY")
+	brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+	brand:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	brand:SetWidth(12)
+	brand:SetHeight(12)
+	brand:SetPoint("CENTER", brandBack, "CENTER", 0, 0)
+	frame.brand = brand
+	local brandText = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	brandText:SetPoint("LEFT", brandBack, "RIGHT", 4, 0)
+	brandText:SetJustifyH("LEFT")
+	brandText:SetText("Spell Meter")
+	face(brandText, 10)
+	brandText:SetTextColor(1, 0.9, 0.62)
+	frame.brandText = brandText
+
+	local modes = CreateFrame("Frame", nil, frame)
+	modes:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -23)
+	modes:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -23)
+	modes:SetHeight(MODE_H)
+	frame.modeBtns = {}
+	frame.modes = modes
+	local modeSpec = {
+		{ mode = "damage", text = "Damage", tip = "Damage dealt this run, and how many kills each spell landed.", tr = 1, tg = 0.9, tb = 0.62, br = 0.42, bg = 0.26, bb = 0.08, er = 0.9, eg = 0.66, eb = 0.22 },
+		{ mode = "healing", text = "Healing", tip = "Healing this run. Overhealing is left out.", tr = 0.72, tg = 0.95, tb = 0.7, br = 0.14, bg = 0.32, bb = 0.16, er = 0.45, eg = 0.78, eb = 0.4 },
+		{ mode = "boss", text = "Boss", tip = "Damage from the last boss fight. Bosses that are up together count as one fight.", tr = 1, tg = 0.72, tb = 0.42, br = 0.4, bg = 0.16, bb = 0.08, er = 0.9, eg = 0.45, eb = 0.16 },
+		{ mode = "taken", text = "Taken", tip = "Damage you took, split by what hit you.", tr = 1, tg = 0.55, tb = 0.45, br = 0.38, bg = 0.12, bb = 0.1, er = 0.85, eg = 0.35, eb = 0.28 },
+	}
+	local msi
+	for msi = 1, table.getn(modeSpec) do
+		local spec = modeSpec[msi]
+		local btn = CreateFrame("Button", nil, modes)
+		btn:SetHeight(MODE_H)
+		btn.mode = spec.mode
+		btn.tip = spec.tip
+		btn.tr, btn.tg, btn.tb = spec.tr, spec.tg, spec.tb
+		btn.br, btn.bg, btn.bb = spec.br, spec.bg, spec.bb
+		btn.er, btn.eg, btn.eb = spec.er, spec.eg, spec.eb
+		btn:SetBackdrop(roundBackdrop(8))
+		local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		label:SetPoint("CENTER", btn, "CENTER", 0, 0)
+		label:SetText(spec.text)
+		face(label, 10)
+		btn.label = label
+		btn:SetScript("OnClick", function()
+			if config().view == this.mode then
+				return
+			end
+			config().viewChosen = 1
+			config().view = this.mode
+			scroll = 0
+			refresh()
+		end)
+		btn:SetScript("OnEnter", function()
+			if config().view ~= this.mode then
+				this:SetBackdropBorderColor(0.72, 0.56, 0.24, 1)
+			end
+			showTip(this, "RIGHT", this.label:GetText(), nil, {
+				{ this.tip, 1, 1, 1 },
+			})
+		end)
+		btn:SetScript("OnLeave", function()
+			leaveTip()
+			if config().view == this.mode then
+				this:SetBackdropBorderColor(this.er, this.eg, this.eb, 1)
+			else
+				this:SetBackdropBorderColor(0.32, 0.22, 0.1, 1)
+			end
+		end)
+		frame.modeBtns[msi] = btn
+	end
 
 	local minBtn = CreateFrame("Button", nil, header)
 	minBtn:SetPoint("RIGHT", header, "RIGHT", -3, 0)
 	minBtn:SetWidth(14)
 	minBtn:SetHeight(14)
-	minBtn:SetBackdrop(panelBackdrop())
-	minBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.95)
+	minBtn:SetBackdrop(roundBackdrop(8))
+	minBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
 	minBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
 	local minText = minBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	minText:SetPoint("CENTER", minBtn, "CENTER", 0, 1)
@@ -1822,8 +2426,8 @@ local function createUI()
 	resetBtn:SetPoint("RIGHT", minBtn, "LEFT", -4, 0)
 	resetBtn:SetHeight(14)
 	resetBtn:SetWidth(42)
-	resetBtn:SetBackdrop(panelBackdrop())
-	resetBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.95)
+	resetBtn:SetBackdrop(roundBackdrop(8))
+	resetBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
 	resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
 	local resetText = resetBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0)
@@ -1833,13 +2437,31 @@ local function createUI()
 	resetBtn:SetScript("OnClick", function()
 		windowReset(false)
 		refresh()
-		say("Reset. This window starts over. The built-in meter is unchanged.")
+		local mode = viewMode()
+		if mode == "healing" then
+			say("Reset. Healing starts over in this window. The built-in meter is unchanged.")
+		elseif mode == "boss" then
+			say("Reset. Boss damage starts over in this window. The built-in meter is unchanged.")
+		elseif mode == "taken" then
+			say("Reset. Damage taken starts over in this window.")
+		else
+			say("Reset. Damage and kills start over in this window. The built-in meter is unchanged.")
+		end
 	end)
 	resetBtn:SetScript("OnEnter", function()
 		resetText:SetTextColor(1, 0.95, 0.7)
 		resetBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		local mode = viewMode()
+		local line = "Starts the damage view over, including kills."
+		if mode == "healing" then
+			line = "Starts the healing view over. Damage and kills are kept."
+		elseif mode == "boss" then
+			line = "Starts the boss view over. Damage and kills are kept."
+		elseif mode == "taken" then
+			line = "Starts the taken view over. Damage dealt and kills are kept."
+		end
 		showTip(this, "RIGHT", "Reset", nil, {
-			{ "Starts this window over. Damage and kills both go back to zero here.", 1, 1, 1 },
+			{ line, 1, 1, 1 },
 			{ "The built-in meter keeps its own numbers.", 0.75, 0.75, 0.75 },
 		})
 	end)
@@ -1863,11 +2485,30 @@ local function createUI()
 	frame.dpsText = dpsText
 	frame.dpsBtn = dpsBtn
 	dpsBtn:SetScript("OnEnter", function()
+		local mode = viewMode()
+		local title = "DPS"
 		local body = "The run's damage per second, from the game's own clock."
-		if state and state.base then
-			body = "Damage per second since the last reset, on the game's clock."
+		if mode == "healing" then
+			title = "HPS"
+			body = "Healing per second over the run's clock. Overhealing is left out."
+		elseif mode == "boss" then
+			body = "Damage per second of this boss fight."
+		elseif mode == "taken" then
+			body = "Damage taken per second over the run's clock."
 		end
-		showTip(this, "LEFT", "DPS", nil, {
+		local bKey = baseFields()
+		if state and state[bKey] then
+			if mode == "healing" then
+				body = "Healing per second since the last reset, on the game's clock."
+			elseif mode == "boss" then
+				body = "Boss damage per second since the last reset."
+			elseif mode == "taken" then
+				body = "Damage taken per second since the last reset."
+			else
+				body = "Damage per second since the last reset, on the game's clock."
+			end
+		end
+		showTip(this, "LEFT", title, nil, {
 			{ body, 1, 1, 1 },
 			{ "It pauses whenever the run pauses.", 0.75, 0.75, 0.75 },
 		})
@@ -1888,30 +2529,115 @@ local function createUI()
 	totalText:SetTextColor(1, 0.9, 0.55)
 	frame.totalText = totalText
 	frame.totalBtn = totalBtn
+	if frame.brandText then
+		frame.brandText:SetPoint("RIGHT", totalBtn, "LEFT", -8, 0)
+	end
 	totalBtn:SetScript("OnEnter", function()
+		local mode = viewMode()
+		local title = "Damage"
 		local tip = "Damage dealt this run, as the game counted it."
-		if state and state.base then
-			tip = "Damage since the last reset, still counted by the game."
+		if mode == "healing" then
+			title = "Healing"
+			tip = "Healing this run, as the game counted it. Overhealing is left out."
+		elseif mode == "boss" then
+			title = "Boss"
+			tip = "Damage dealt in the last boss fight. It stays until the next boss."
+		elseif mode == "taken" then
+			title = "Taken"
+			tip = "Damage you took this run, split by what hit you."
 		end
-		showTip(this, "LEFT", "Damage", nil, {
+		local bKey = baseFields()
+		if state and state[bKey] then
+			tip = "Since the last reset on this view, still counted by the game."
+		end
+		local lines = {
 			{ tip, 1, 1, 1 },
-		})
+		}
+		local stats = AZS_STATS
+		if stats then
+			local function push(text)
+				if text and table.getn(lines) < 8 then
+					local n = table.getn(lines) + 1
+					lines[n] = { text, 0.82, 0.78, 0.62 }
+				end
+			end
+			local function mult(v)
+				v = tonumber(v)
+				if not v or v == 0 then
+					return nil
+				end
+				return string.format("x%.2f", v)
+			end
+			local function pct(v)
+				v = tonumber(v)
+				if not v or v == 0 then
+					return nil
+				end
+				if v > 0 and v <= 1.5 then
+					return string.format("%.0f%%", v * 100)
+				end
+				return string.format("%.0f%%", v)
+			end
+			local function num(v)
+				v = tonumber(v)
+				if not v or v == 0 then
+					return nil
+				end
+				if v == math.floor(v) then
+					return string.format("%d", v)
+				end
+				return string.format("%.2f", v)
+			end
+			local text
+			text = mult(stats.dmg)
+			if text then
+				push("Damage " .. text)
+			end
+			text = pct(stats.crit)
+			if text then
+				push("Crit " .. text)
+			end
+			text = mult(stats.cm)
+			if text then
+				push("Crit damage " .. text)
+			end
+			text = mult(stats.cd)
+			if text then
+				push("Cooldown " .. text)
+			end
+			text = num(stats.cnt)
+			if text then
+				push("Extra targets " .. text)
+			end
+			text = num(stats.area)
+			if text then
+				push("Area " .. text)
+			end
+			text = num(stats.echo)
+			if text then
+				push("Echo " .. text)
+			end
+		end
+		showTip(this, "LEFT", title, nil, lines)
 	end)
 	totalBtn:SetScript("OnLeave", function()
 		leaveTip()
 	end)
 
 	local cols = CreateFrame("Frame", nil, frame)
-	cols:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -20)
-	cols:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -6, -20)
+	cols:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -(HEADER - COL_H))
+	cols:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(HEADER - COL_H))
 	cols:SetHeight(12)
 	frame.cols = cols
 	local countText = cols:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	countText:SetPoint("LEFT", cols, "LEFT", 2, 0)
+	countText:SetJustifyH("LEFT")
 	countText:SetText("")
 	face(countText, 9)
-	countText:SetTextColor(0.62, 0.56, 0.46)
+	countText:SetTextColor(0.55, 0.5, 0.4)
 	frame.countText = countText
+	local baseLevel = frame:GetFrameLevel() or 1
+	cols:SetFrameLevel(baseLevel + 6)
 	frame.sortBtns = {}
 
 	local function makeSortButton(key, base, width, justify)
@@ -1946,9 +2672,10 @@ local function createUI()
 		end)
 		btn:SetScript("OnEnter", function()
 			local picked = this.key
-			local title = "Damage"
+			local amountWord, rateWord = meterWords()
+			local title = amountWord
 			local lines = {
-				{ "Click to sort by the damage column.", 1, 1, 1 },
+				{ "Click to sort by this column.", 1, 1, 1 },
 				{ "Click again to reverse the order.", 0.75, 0.75, 0.75 },
 			}
 			if picked == "kills" then
@@ -1959,9 +2686,9 @@ local function createUI()
 					{ "Click again to reverse the order.", 0.75, 0.75, 0.75 },
 				}
 			elseif picked == "dps" then
-				title = "DPS"
+				title = rateWord
 				lines = {
-					{ "This spell's damage per second. Click to sort.", 1, 1, 1 },
+					{ "This spell's rate. Click to sort.", 1, 1, 1 },
 					{ "Click again to reverse the order.", 0.75, 0.75, 0.75 },
 				}
 			end
@@ -1980,14 +2707,17 @@ local function createUI()
 	dmgCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
 	local killCol = makeSortButton("kills", "Kills", COL_KILL, "RIGHT")
 	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -6, 0)
+	frame.dpsCol = dpsCol
+	frame.dmgCol = dmgCol
+	frame.killCol = killCol
 
 	local scrollFrame = CreateFrame("ScrollFrame", "AZSSpellMeterScroll", frame)
-	scrollFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 6, -HEADER)
-	scrollFrame:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -6, -HEADER)
+	scrollFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -HEADER)
+	scrollFrame:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -HEADER)
 	scrollFrame:SetHeight(8 * ROW_H)
 	scrollFrame:EnableMouseWheel(true)
 	local scrollChild = CreateFrame("Frame", "AZSSpellMeterScrollChild", scrollFrame)
-	scrollChild:SetWidth((cfg.width or WIDTH) - 12)
+	scrollChild:SetWidth((cfg.width or WIDTH) - 16)
 	scrollChild:SetHeight((MAX_ROWS) * ROW_H)
 	scrollFrame:SetScrollChild(scrollChild)
 	frame.scroll = scrollFrame
@@ -1996,7 +2726,7 @@ local function createUI()
 	local i
 	for i = 1, ROW_POOL do
 		rows[i] = createRow(scrollChild, i)
-		rows[i]:SetWidth((cfg.width or WIDTH) - 12)
+		rows[i]:SetWidth((cfg.width or WIDTH) - 16)
 	end
 
 	local emptyText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2070,9 +2800,9 @@ local function createUI()
 	if tip.SetClampedToScreen then
 		tip:SetClampedToScreen(true)
 	end
-	tip:SetBackdrop(panelBackdrop())
-	tip:SetBackdropColor(0.06, 0.05, 0.04, 0.97)
-	tip:SetBackdropBorderColor(0.58, 0.42, 0.16, 1)
+	tip:SetBackdrop(roundBackdrop(12))
+	tip:SetBackdropColor(0.05, 0.04, 0.03, 0.9)
+	tip:SetBackdropBorderColor(0.78, 0.58, 0.22, 1)
 	local iconBack = tip:CreateTexture(nil, "ARTWORK")
 	iconBack:SetTexture(SOLID)
 	iconBack:SetVertexColor(0, 0, 0, 1)
@@ -2093,7 +2823,7 @@ local function createUI()
 	tip.title = tipTitle
 	tip.lines = {}
 	local li
-	for li = 1, 6 do
+	for li = 1, 8 do
 		local fs = tip:CreateFontString(nil, "OVERLAY")
 		fs:SetJustifyH("LEFT")
 		face(fs, 11)
@@ -2133,8 +2863,13 @@ local function createUI()
 	totalBtn:SetScript("OnMouseWheel", onWheel)
 	dpsBtn:EnableMouseWheel(true)
 	dpsBtn:SetScript("OnMouseWheel", onWheel)
-	titleBtn:EnableMouseWheel(true)
-	titleBtn:SetScript("OnMouseWheel", onWheel)
+	modes:EnableMouseWheel(true)
+	modes:SetScript("OnMouseWheel", onWheel)
+	local mwi
+	for mwi = 1, table.getn(frame.modeBtns) do
+		frame.modeBtns[mwi]:EnableMouseWheel(true)
+		frame.modeBtns[mwi]:SetScript("OnMouseWheel", onWheel)
+	end
 	resetBtn:EnableMouseWheel(true)
 	resetBtn:SetScript("OnMouseWheel", onWheel)
 	minBtn:EnableMouseWheel(true)
@@ -2218,8 +2953,8 @@ local function createUI()
 	if bubble.SetClampedToScreen then
 		bubble:SetClampedToScreen(true)
 	end
-	bubble:SetBackdrop(panelBackdrop())
-	bubble:SetBackdropColor(0.34, 0.21, 0.06, 0.98)
+	bubble:SetBackdrop(roundBackdrop(12))
+	bubble:SetBackdropColor(0.28, 0.16, 0.05, 0.9)
 	bubble:SetBackdropBorderColor(0.85, 0.62, 0.2, 1)
 	bubble:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 	local bubbleText = bubble:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2297,6 +3032,7 @@ local function createUI()
 	bubble:Hide()
 
 	applyShown()
+	refresh()
 	if config().shown == false and not toldHidden then
 		toldHidden = true
 		say("The window is hidden. Type /azsm to show it.")
@@ -2336,6 +3072,7 @@ local function onEvent()
 	if not state then
 		return
 	end
+	noteItemText(arg1)
 	if event == "PLAYER_ENTERING_WORLD" then
 		clockOn = true
 		dead = UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") and true or false
@@ -2367,8 +3104,12 @@ local function onEvent()
 		if choiceMessage(arg1) then
 			beginChoice()
 		end
-	elseif event == "SPELLS_CHANGED" or event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "LEARNED_SPELL_IN_TAB" then
+	elseif event == "SPELLS_CHANGED" or event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "BAG_UPDATE" then
 		queueScan()
+	elseif event == "UNIT_INVENTORY_CHANGED" then
+		if arg1 == "player" then
+			queueScan()
+		end
 	elseif event == "CHAT_MSG_SPELL_SELF_DAMAGE" or event == "CHAT_MSG_COMBAT_SELF_HITS" or event == "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF" or event == "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS" then
 		onCombat("yours")
 	elseif event == "CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE" or event == "CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_DAMAGE" then
@@ -2407,7 +3148,10 @@ driver:RegisterEvent("CHAT_MSG_COMBAT_HOSTILEPLAYER_DEATH")
 driver:RegisterEvent("SPELLS_CHANGED")
 driver:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 driver:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
-driver:RegisterEvent("LEARNED_SPELL_IN_TAB")
+	driver:RegisterEvent("LEARNED_SPELL_IN_TAB")
+	driver:RegisterEvent("BAG_UPDATE")
+	driver:RegisterEvent("UNIT_INVENTORY_CHANGED")
+	driver:RegisterEvent("CHAT_MSG_LOOT")
 driver:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
 driver:RegisterEvent("CHAT_MSG_COMBAT_SELF_HITS")
 driver:RegisterEvent("CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF")
@@ -2445,6 +3189,7 @@ end
 
 local function loadTest()
 	resetData()
+	config().view = "damage"
 	testMeter = {
 		{ name = "Shadow Bolt", dmg = 223342, dps = 3722, proc = 0 },
 		{ name = "Corruption", dmg = 96440, dps = 1607, proc = 0 },
@@ -2499,7 +3244,16 @@ SlashCmdList["AZSSPELLMETER"] = function(msg)
 	elseif msg == "reset" then
 		windowReset(true)
 		refresh()
-		say("Reset. This window starts over. The built-in meter is unchanged.")
+		local mode = viewMode()
+		if mode == "healing" then
+			say("Reset. Healing starts over in this window. The built-in meter is unchanged.")
+		elseif mode == "boss" then
+			say("Reset. Boss damage starts over in this window. The built-in meter is unchanged.")
+		elseif mode == "taken" then
+			say("Reset. Damage taken starts over in this window.")
+		else
+			say("Reset. Damage and kills start over in this window. The built-in meter is unchanged.")
+		end
 	elseif msg == "lock" then
 		toggleLock()
 	elseif msg == "test" then
