@@ -28,6 +28,8 @@ Drag the bronze title bar to move the window. Drag the corner to resize it. If t
 
 Damage, Healing, Boss, and Taken are the buttons under the title. Damage includes kills per spell. Healing is health actually restored. Boss is the last boss fight, and it stays up until the next boss. Taken is the damage you took, split by what hit you. A thin bar under a spell icon is its cooldown. Hover the total for your build stats.
 
+Right-click a button to open that view in its own window. The button stays, dimmed. Click it, or the x on the extra window, to bring the view back. Each view is only in one place. The extra window has its own size, position, and Reset.
+
 | Command | |
 |---|---|
 | `/azsm` | Show or hide. If the window is off screen, this brings it back |
@@ -36,11 +38,18 @@ Damage, Healing, Boss, and Taken are the buttons under the title. Damage include
 | `/azsm lock` | Lock or unlock dragging |
 | `/spellmeter` | Same as `/azsm` |
 
-While this window is open, the built-in Damage Done meter is hidden. Hiding this addon puts it back, if it was on before.
+While the main window, its bubble, or an extra window is open, the built-in Damage Done meter is hidden. It comes back when all of them are closed, if it was on before.
 
 The window position is remembered across updates. Deleting the addon folder does not clear it. If the window is missing, type `/azsm resetpos`.
 
 ## Changelog
+
+### 1.21
+
+- Right-click Damage, Healing, Boss, or Taken to open that view in its own window. The button stays, dimmed.
+- Click the dimmed button, or the x on the extra window, to bring the view back.
+- Each view is only shown in one place. An extra window has its own size, position, and Reset.
+- The built-in meter stays hidden while any of these windows is open.
 
 ### 1.20
 

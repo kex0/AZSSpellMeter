@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.21
+
+- Right-click Damage, Healing, Boss, or Taken to open that view in its own window. The button stays on the main window, dimmed.
+- Click the dimmed button, or the x on the extra window, to put the view back. The main window switches to it.
+- Each view is only shown in one place. An extra window has its own size, position, scroll, and Reset.
+- Opening the view the main window is showing switches the main window to another view. The last view on the main window stays there.
+- The built-in meter stays hidden while the main window, its bubble, or an extra window is open.
+
 ## 1.20
 
 - Damage, Healing, Boss, and Taken sit under the title bar. Damage is selected until you pick another. The highlighted button is the view you are on.

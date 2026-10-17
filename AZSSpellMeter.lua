@@ -63,6 +63,15 @@ local sorted = {}
 local icons = {}
 local state
 local scroll = 0
+local popped = {}
+local built = {}
+local DETACH_H = 35
+local VIEW_TITLE = {
+	damage = "Damage",
+	healing = "Healing",
+	boss = "Boss",
+	taken = "Taken",
+}
 local scanAt = 0
 local lastRaw = ""
 local lastHit = ""
@@ -868,11 +877,14 @@ local function visibleRows()
 	return n
 end
 
-local function rowWidth()
-	if not frame then
+local function rowWidth(win)
+	if not win then
+		win = frame
+	end
+	if not win then
 		return WIDTH - 16
 	end
-	local w = frame:GetWidth() - 16
+	local w = win:GetWidth() - 16
 	if w < 40 then
 		w = 40
 	end
@@ -978,13 +990,18 @@ local function viewMode()
 	return v
 end
 
-local function showsKills()
-	return viewMode() == "damage"
+local function showsKills(mode)
+	if not mode then
+		mode = viewMode()
+	end
+	return mode == "damage"
 end
 
 -- Amount word, rate word, and whether the kill tally belongs on this view.
-local function meterWords()
-	local mode = viewMode()
+local function meterWords(mode)
+	if not mode then
+		mode = viewMode()
+	end
 	if mode == "healing" then
 		return "Healing", "HPS", false
 	elseif mode == "taken" then
@@ -993,8 +1010,10 @@ local function meterWords()
 	return "Damage", "DPS", mode == "damage"
 end
 
-local function baseFields()
-	local mode = viewMode()
+local function baseFields(mode)
+	if not mode then
+		mode = viewMode()
+	end
 	if mode == "healing" then
 		return "healBase", "healBaseTotal", "healBaseTime"
 	elseif mode == "boss" then
@@ -1005,8 +1024,10 @@ local function baseFields()
 	return "base", "baseTotal", "baseTime"
 end
 
-local function pullMeter()
-	local mode = viewMode()
+local function pullMeter(mode)
+	if not mode then
+		mode = viewMode()
+	end
 	if mode == "damage" and testMeter then
 		return meterFrom(testMeter)
 	end
@@ -1052,11 +1073,11 @@ end
 
 -- The built-in meter cannot be cleared from an addon. Remember its numbers at
 -- the moment of a reset and show only what it has added since.
-local function captureBase()
+local function captureBase(mode)
 	if not state then
 		loadState()
 	end
-	local lines, total = pullMeter()
+	local lines, total = pullMeter(mode)
 	local base = {}
 	if lines then
 		local i
@@ -1068,26 +1089,34 @@ local function captureBase()
 			end
 		end
 	end
-	local bKey, tKey, timeKey = baseFields()
+	local bKey, tKey, timeKey = baseFields(mode)
 	state[bKey] = base
 	state[tKey] = tonumber(total) or 0
 	state[timeKey] = runNow()
 end
 
-local function windowReset(dropTest)
+local function windowReset(dropTest, mode)
+	if not mode then
+		mode = viewMode()
+	end
 	if not state then
 		loadState()
 	end
 	if dropTest then
 		testMeter = nil
 	end
-	captureBase()
-	if showsKills() then
+	captureBase(mode)
+	if showsKills(mode) then
 		state.spells = {}
 		state.kills = 0
 		lastBlow = {}
 	end
-	scroll = 0
+	if viewMode() == mode then
+		scroll = 0
+	end
+	if popped[mode] then
+		popped[mode].scrollPos = 0
+	end
 end
 
 -- One parent spell when the proc names a single cast, or only one of its
@@ -1115,7 +1144,7 @@ local function anchorSpell(procName, present)
 	return found
 end
 
-local function rebuild()
+local function rebuild(mode)
 	local i
 	for i = table.getn(sorted), 1, -1 do
 		sorted[i] = nil
@@ -1123,9 +1152,9 @@ local function rebuild()
 	if not state then
 		return 0
 	end
-	local lines, total, rdps = pullMeter()
+	local lines, total, rdps = pullMeter(mode)
 	local gameTotal = tonumber(total) or 0
-	local bKey, tKey, timeKey = baseFields()
+	local bKey, tKey, timeKey = baseFields(mode)
 	local baseMap = state[bKey]
 	if baseMap and gameTotal + 1 < (state[tKey] or 0) then
 		state[bKey] = nil
@@ -1194,7 +1223,7 @@ local function rebuild()
 			end
 		end
 	end
-	if showsKills() then
+	if showsKills(mode) then
 		local spellName, rec
 		for spellName, rec in pairs(state.spells) do
 			if (rec.kills or 0) > 0 then
@@ -1224,7 +1253,7 @@ local function rebuild()
 			parent.damage = (parent.damage or 0) + (row.damage or 0)
 			parent.dps = (parent.dps or 0) + (row.dps or 0)
 			parent.kills = (parent.kills or 0) + (row.kills or 0)
-			if (row.damage or 0) > 0 or (showsKills() and (row.kills or 0) > 0) then
+			if (row.damage or 0) > 0 or (showsKills(mode) and (row.kills or 0) > 0) then
 				if not parent.procs then
 					parent.procs = {}
 				end
@@ -1243,7 +1272,7 @@ local function rebuild()
 	local name, entry
 	for name, entry in pairs(bucket) do
 		local keep = (entry.damage or 0) > 0
-		if showsKills() and (entry.kills or 0) > 0 then
+		if showsKills(mode) and (entry.kills or 0) > 0 then
 			keep = true
 		end
 		if not keep and entry.procs and table.getn(entry.procs) > 0 then
@@ -1258,7 +1287,7 @@ local function rebuild()
 		end
 	end
 	local key = config().sort or "damage"
-	if key == "name" or key == "share" or (key == "kills" and not showsKills()) then
+	if key == "name" or key == "share" or (key == "kills" and not showsKills(mode)) then
 		key = "damage"
 	end
 	local desc = config().sortDir ~= "asc"
@@ -1319,10 +1348,17 @@ local function compactKey(name)
 end
 
 -- Pixel height of the list. Not snapped to a row, so the scroll frame can cut a spell in half.
-local function viewHeight()
+local function viewHeight(win)
+	if not win then
+		win = frame
+	end
+	local head = HEADER
+	if win and win.headH then
+		head = win.headH
+	end
 	local avail = 8 * ROW_H
-	if frame then
-		avail = frame:GetHeight() - HEADER - 10
+	if win then
+		avail = win:GetHeight() - head - 10
 	end
 	if avail < 8 then
 		avail = 8
@@ -1330,31 +1366,32 @@ local function viewHeight()
 	return avail
 end
 
-local function refresh()
-	if not frame or not state then
+local function refreshWindow(win)
+	if not win or not state then
 		return
 	end
-	watchRun()
-	noteDeath()
-	if frame:IsShown() or (bubble and bubble:IsShown()) then
-		hideStockMeter()
+	local headH = win.headH or HEADER
+	local listRows = win.rows or rows
+	local pos = scroll
+	if win ~= frame then
+		pos = win.scrollPos or 0
 	end
-	local n = rebuild()
-	local viewH = viewHeight()
+	local n = rebuild(win.fixed)
+	local viewH = viewHeight(win)
 	local maxOff = n * ROW_H - viewH
 	if maxOff < 0 then
 		maxOff = 0
 	end
-	if scroll < 0 then
-		scroll = 0
-	elseif scroll > maxOff then
-		scroll = maxOff
+	if pos < 0 then
+		pos = 0
+	elseif pos > maxOff then
+		pos = maxOff
 	end
 	local first = 0
 	if ROW_H > 0 then
-		first = math.floor(scroll / ROW_H)
+		first = math.floor(pos / ROW_H)
 	end
-	local shift = scroll - first * ROW_H
+	local shift = pos - first * ROW_H
 	local shown = 0
 	if n > 0 then
 		shown = math.floor((shift + viewH - 0.001) / ROW_H) + 1
@@ -1368,23 +1405,23 @@ local function refresh()
 			shown = 1
 		end
 	end
-	if frame.scroll then
-		local top = HEADER
-		frame.scroll:ClearAllPoints()
-		frame.scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -top)
-		frame.scroll:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -top)
-		if frame.cols then
-			frame.cols:ClearAllPoints()
-			frame.cols:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -(top - COL_H))
-			frame.cols:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(top - COL_H))
+	if win.scroll then
+		local top = headH
+		win.scroll:ClearAllPoints()
+		win.scroll:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -top)
+		win.scroll:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -top)
+		if win.cols then
+			win.cols:ClearAllPoints()
+			win.cols:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -(top - COL_H))
+			win.cols:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -(top - COL_H))
 		end
-		frame.scroll:SetHeight(viewH)
-		local sw = frame.scroll:GetWidth()
+		win.scroll:SetHeight(viewH)
+		local sw = win.scroll:GetWidth()
 		if not sw or sw < 40 then
-			sw = rowWidth()
+			sw = rowWidth(win)
 		end
-		if frame.scrollChild then
-			frame.scrollChild:SetWidth(sw)
+		if win.scrollChild then
+			win.scrollChild:SetWidth(sw)
 			local childH = shown * ROW_H
 			if childH < viewH + shift then
 				childH = viewH + shift
@@ -1392,18 +1429,18 @@ local function refresh()
 			if childH < 1 then
 				childH = 1
 			end
-			frame.scrollChild:SetHeight(childH)
+			win.scrollChild:SetHeight(childH)
 		end
-		if frame.scroll.SetVerticalScroll then
-			frame.scroll:SetVerticalScroll(shift)
+		if win.scroll.SetVerticalScroll then
+			win.scroll:SetVerticalScroll(shift)
 		end
 	end
 
-	local mode = viewMode()
-	local amountWord, rateWord, killView = meterWords()
+	local mode = win.fixed or viewMode()
+	local amountWord, rateWord, killView = meterWords(win.fixed)
 	local board = meterTotal
 	local dps = meterDps
-	if frame.emptyText then
+	if win.emptyText then
 		if n <= 0 then
 			local empty = "No damage yet."
 			if mode == "healing" then
@@ -1425,16 +1462,16 @@ local function refresh()
 					empty = "Damage taken needs a newer game build."
 				end
 			end
-			frame.emptyText:SetText(empty)
-			frame.emptyText:ClearAllPoints()
-			frame.emptyText:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -(HEADER + 6))
-			frame.emptyText:Show()
+			win.emptyText:SetText(empty)
+			win.emptyText:ClearAllPoints()
+			win.emptyText:SetPoint("TOPLEFT", win, "TOPLEFT", 12, -(headH + 6))
+			win.emptyText:Show()
 		else
-			frame.emptyText:Hide()
+			win.emptyText:Hide()
 		end
 	end
-	frame.totalText:SetText(comma(board))
-	if frame.brandText then
+	win.totalText:SetText(comma(board))
+	if win.brandText then
 		local title = "Spell Meter"
 		local classKey = ""
 		local className = ""
@@ -1451,83 +1488,85 @@ local function refresh()
 				classKey = string.lower(english)
 			end
 		end
-		if className ~= "" then
+		if win.fixed then
+			title = VIEW_TITLE[win.fixed] or title
+		elseif className ~= "" then
 			title = className
 		end
-		frame.brandText:SetText(title)
-		frame.brandText:SetTextColor(1, 0.9, 0.62)
-		if frame.brand then
+		win.brandText:SetText(title)
+		win.brandText:SetTextColor(1, 0.9, 0.62)
+		if win.brand then
 			local coord = CLASS_ICON[classKey]
 			if coord then
-				frame.brand:SetTexture(CLASS_SHEET)
-				frame.brand:SetTexCoord(coord[1], coord[2], coord[3], coord[4])
+				win.brand:SetTexture(CLASS_SHEET)
+				win.brand:SetTexCoord(coord[1], coord[2], coord[3], coord[4])
 			else
-				frame.brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
-				frame.brand:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+				win.brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+				win.brand:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 			end
 		end
 	end
 	if mode == "healing" then
-		frame.totalText:SetTextColor(0.72, 0.95, 0.7)
+		win.totalText:SetTextColor(0.72, 0.95, 0.7)
 	elseif mode == "boss" then
-		frame.totalText:SetTextColor(1, 0.72, 0.42)
+		win.totalText:SetTextColor(1, 0.72, 0.42)
 	elseif mode == "taken" then
-		frame.totalText:SetTextColor(1, 0.55, 0.45)
+		win.totalText:SetTextColor(1, 0.55, 0.45)
 	else
-		frame.totalText:SetTextColor(1, 0.9, 0.55)
+		win.totalText:SetTextColor(1, 0.9, 0.55)
 	end
-	frame.dpsText:SetText(fmtRate(dps) .. " " .. string.lower(rateWord))
-	if frame.bubbleText then
-		frame.bubbleText:SetText(comma(board))
+	win.dpsText:SetText(fmtRate(dps) .. " " .. string.lower(rateWord))
+	if win.bubbleText then
+		win.bubbleText:SetText(comma(board))
 		local bw = 36
-		if frame.bubbleText.GetStringWidth then
-			bw = (frame.bubbleText:GetStringWidth() or 24) + 16
+		if win.bubbleText.GetStringWidth then
+			bw = (win.bubbleText:GetStringWidth() or 24) + 16
 		end
 		if bw < 36 then
 			bw = 36
 		end
 		bubble:SetWidth(bw)
 	end
-	if frame.totalBtn and frame.totalText.GetStringWidth then
-		local tw = frame.totalText:GetStringWidth() or 24
+	if win.totalBtn and win.totalText.GetStringWidth then
+		local tw = win.totalText:GetStringWidth() or 24
 		if tw < 24 then
 			tw = 24
 		end
-		frame.totalBtn:SetWidth(tw + 8)
+		win.totalBtn:SetWidth(tw + 8)
 	end
-	if frame.dpsBtn and frame.dpsText.GetStringWidth then
-		local dw = frame.dpsText:GetStringWidth() or 24
+	if win.dpsBtn and win.dpsText.GetStringWidth then
+		local dw = win.dpsText:GetStringWidth() or 24
 		if dw < 24 then
 			dw = 24
 		end
-		frame.dpsBtn:SetWidth(dw + 8)
+		win.dpsBtn:SetWidth(dw + 8)
 	end
-	if frame.sortBtns then
+	if win.sortBtns then
 		local active = config().sort or "damage"
 		if active == "name" or active == "share" or (active == "kills" and not killView) then
 			active = "damage"
 		end
-		if frame.dmgCol then
-			frame.dmgCol.base = amountWord
+		if win.dmgCol then
+			win.dmgCol.base = amountWord
 			if mode == "healing" then
-				frame.dmgCol:SetWidth(58)
+				win.dmgCol:SetWidth(58)
 			else
-				frame.dmgCol:SetWidth(COL_DMG)
+				win.dmgCol:SetWidth(COL_DMG)
 			end
 		end
-		if frame.dpsCol then
-			frame.dpsCol.base = rateWord
+		if win.dpsCol then
+			win.dpsCol.base = rateWord
 		end
-		if frame.killCol then
+		if win.killCol then
 			if killView then
-				frame.killCol:Show()
+				win.killCol:Show()
 			else
-				frame.killCol:Hide()
+				win.killCol:Hide()
 			end
 		end
 		local si
-		for si = 1, table.getn(frame.sortBtns) do
-			local btn = frame.sortBtns[si]
+		for si = 1, table.getn(win.sortBtns) do
+			local btn = win.sortBtns[si]
 			btn.label:SetText(btn.base)
 			if btn.key == active then
 				btn.label:SetTextColor(1, 0.82, 0.4)
@@ -1536,12 +1575,16 @@ local function refresh()
 			end
 		end
 	end
-	if frame.modeBtns then
+	if win.modeBtns then
 		local mi
-		for mi = 1, table.getn(frame.modeBtns) do
-			local btn = frame.modeBtns[mi]
-			local on = btn.mode == mode
-			if on then
+		for mi = 1, table.getn(win.modeBtns) do
+			local btn = win.modeBtns[mi]
+			local on = btn.mode == mode and not popped[btn.mode]
+			if popped[btn.mode] then
+				btn.label:SetTextColor(0.45, 0.4, 0.32)
+				btn:SetBackdropColor(0.08, 0.06, 0.04, 0.4)
+				btn:SetBackdropBorderColor(0.4, 0.32, 0.16, 0.7)
+			elseif on then
 				btn.label:SetTextColor(btn.tr, btn.tg, btn.tb)
 				btn:SetBackdropColor(btn.br, btn.bg, btn.bb, 0.92)
 				btn:SetBackdropBorderColor(btn.er, btn.eg, btn.eb, 1)
@@ -1553,15 +1596,15 @@ local function refresh()
 		end
 		local gap = 3
 		local inner = 0
-		if frame.modes and frame.modes.GetWidth then
-			inner = frame.modes:GetWidth() or 0
+		if win.modes and win.modes.GetWidth then
+			inner = win.modes:GetWidth() or 0
 		end
 		if inner < 40 then
-			inner = (frame:GetWidth() or WIDTH) - 16
+			inner = (win:GetWidth() or WIDTH) - 16
 		end
 		local tabs = 4
-		if frame.modeBtns then
-			tabs = table.getn(frame.modeBtns)
+		if win.modeBtns then
+			tabs = table.getn(win.modeBtns)
 		end
 		if tabs < 1 then
 			tabs = 1
@@ -1575,41 +1618,42 @@ local function refresh()
 		if shift < 0 then
 			shift = 0
 		end
-		for mi = 1, table.getn(frame.modeBtns) do
-			local btn = frame.modeBtns[mi]
+		for mi = 1, table.getn(win.modeBtns) do
+			local btn = win.modeBtns[mi]
 			btn:ClearAllPoints()
 			btn:SetWidth(bw)
-			if frame.modes then
-				btn:SetPoint("LEFT", frame.modes, "LEFT", shift + (mi - 1) * (bw + gap), 0)
+			if win.modes then
+				btn:SetPoint("LEFT", win.modes, "LEFT", shift + (mi - 1) * (bw + gap), 0)
 			end
 		end
 	end
 	if killView and (state.kills or 0) > 0 then
-		frame.countText:SetText(state.kills .. (state.kills == 1 and " kill" or " kills"))
+		win.countText:SetText(state.kills .. (state.kills == 1 and " kill" or " kills"))
 	else
-		frame.countText:SetText("")
+		win.countText:SetText("")
 	end
 
-	frame.cdMap = {}
+	win.cdMap = {}
 	if AZS_SPELLS then
 		local si
 		for si = 1, table.getn(AZS_SPELLS) do
 			local sp = AZS_SPELLS[si]
 			if sp.key and sp.key ~= "" then
-				frame.cdMap[compactKey(sp.key)] = sp
+				win.cdMap[compactKey(sp.key)] = sp
 			end
 		end
 	end
 
 	local i
 	for i = 1, ROW_POOL do
-		local row = rows[i]
+		local row = listRows[i]
 		local data = nil
 		if i <= shown then
 			data = sorted[first + i]
 		end
 		if data then
 			local dealt = data.damage or 0
+			row.win = win
 			local share = 0
 			if board > 0 then
 				share = dealt / board
@@ -1617,7 +1661,7 @@ local function refresh()
 			local label = data.name
 			row.data = data
 			row:Show()
-			row:SetWidth(rowWidth())
+			row:SetWidth(rowWidth(win))
 			row.icon:SetTexture(rowIcon(data))
 			row.name:SetText(string.format("%d  %s", first + i, label))
 			if killView and (data.kills or 0) > 0 then
@@ -1702,6 +1746,7 @@ local function refresh()
 						px = limit
 					end
 					btn.info = info
+					btn.win = win
 					if btn.icon then
 						btn.icon:SetTexture(iconFor(info.name))
 					end
@@ -1714,7 +1759,7 @@ local function refresh()
 					btn:Hide()
 				end
 			end
-			local cd = frame.cdMap and frame.cdMap[compactKey(data.name)]
+			local cd = win.cdMap and win.cdMap[compactKey(data.name)]
 			if row.cd and cd and (tonumber(cd.cdmax) or 0) > 0 then
 				local maxc = tonumber(cd.cdmax) or 1
 				if maxc < 0.1 then
@@ -1753,6 +1798,47 @@ local function refresh()
 			if row.cd then
 				row.cd:Hide()
 			end
+		end
+	end
+	win.total = meterTotal
+	win.dps = meterDps
+	if win == frame then
+		scroll = pos
+	else
+		win.scrollPos = pos
+	end
+end
+
+local function anyMeterShown()
+	if frame and frame:IsShown() then
+		return true
+	end
+	if bubble and bubble:IsShown() then
+		return true
+	end
+	local mode, pop
+	for mode, pop in pairs(popped) do
+		if pop:IsShown() then
+			return true
+		end
+	end
+	return false
+end
+
+local function refresh()
+	if not frame or not state then
+		return
+	end
+	watchRun()
+	noteDeath()
+	if anyMeterShown() then
+		hideStockMeter()
+	end
+	refreshWindow(frame)
+	local mode, pop
+	for mode, pop in pairs(popped) do
+		if pop:IsShown() then
+			refreshWindow(pop)
 		end
 	end
 end
@@ -2154,11 +2240,16 @@ local function createRow(parent, index)
 				hideTip()
 				return
 			end
-			local share = 0
-			if meterTotal > 0 then
-				share = (data.damage or 0) / meterTotal
+			local host = owner.win or frame
+			local total = meterTotal
+			if host and host.total then
+				total = host.total
 			end
-			local amountWord, rateWord, killView = meterWords()
+			local share = 0
+			if total > 0 then
+				share = (data.damage or 0) / total
+			end
+			local amountWord, rateWord, killView = meterWords(host and host.fixed)
 			local lines = {
 				{ string.format("%s %s", amountWord, comma(data.damage)), 1, 1, 1 },
 				{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
@@ -2209,10 +2300,15 @@ local function createRow(parent, index)
 					hideTip()
 					return
 				end
-				local amountWord, rateWord, killView = meterWords()
+				local host = owner.win or frame
+				local total = meterTotal
+				if host and host.total then
+					total = host.total
+				end
+				local amountWord, rateWord, killView = meterWords(host and host.fixed)
 				local share = 0
-				if meterTotal > 0 then
-					share = (info.damage or 0) / meterTotal
+				if total > 0 then
+					share = (info.damage or 0) / total
 				end
 				local lines = {
 					{ string.format("%s %s", amountWord, comma(info.damage or 0)), 1, 1, 1 },
@@ -2238,6 +2334,501 @@ local function createRow(parent, index)
 	row:Hide()
 	return row
 end
+
+local VIEW_ORDER = { "damage", "healing", "boss", "taken" }
+local createDetached, detach, dock
+
+local function otherHome(skip)
+	local i
+	for i = 1, table.getn(VIEW_ORDER) do
+		local mode = VIEW_ORDER[i]
+		if mode ~= skip and not popped[mode] then
+			return mode
+		end
+	end
+	return nil
+end
+
+local function popBox(mode)
+	local cfg = config()
+	if not cfg.pops then
+		cfg.pops = {}
+	end
+	if not cfg.pops[mode] then
+		cfg.pops[mode] = {}
+	end
+	return cfg.pops[mode]
+end
+
+local function savePop(win)
+	if not win or not win.fixed then
+		return
+	end
+	local point, _, rel, x, y = win:GetPoint(1)
+	if not point then
+		return
+	end
+	local box = popBox(win.fixed)
+	box.point = point
+	box.rel = rel
+	box.x = x
+	box.y = y
+	box.width = win:GetWidth()
+	box.height = win:GetHeight()
+	if win:IsShown() then
+		box.shown = 1
+	else
+		box.shown = false
+	end
+end
+
+local function placePop(win)
+	local box = popBox(win.fixed)
+	local width = box.width
+	local height = box.height
+	if not width and frame then
+		width = frame:GetWidth()
+	end
+	if not height and frame then
+		height = frame:GetHeight() - (HEADER - DETACH_H)
+	end
+	if not width or width < 280 then
+		width = WIDTH
+	end
+	local minH = DETACH_H + BOTTOM + 3 * ROW_H
+	if not height or height < minH then
+		height = minH
+	end
+	win:SetWidth(width)
+	win:SetHeight(height)
+	win:ClearAllPoints()
+	if box.x and box.y then
+		win:SetPoint(box.point or "TOPLEFT", UIParent, box.rel or "BOTTOMLEFT", box.x, box.y)
+		return
+	end
+	local left = 40
+	local top = 400
+	if frame and frame.GetRight then
+		left = (frame:GetRight() or left) + 12
+		top = frame:GetTop() or top
+	end
+	win:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+end
+
+createDetached = function(mode)
+	local win = CreateFrame("Frame", "AZSSpellMeterPop" .. mode, UIParent)
+	win.fixed = mode
+	win.headH = DETACH_H
+	win.scrollPos = 0
+	win.rows = {}
+	win:SetFrameStrata("HIGH")
+	win:SetMovable(true)
+	win:EnableMouse(true)
+	win:EnableMouseWheel(true)
+	if win.SetResizable then
+		win:SetResizable(true)
+	end
+	local minH = DETACH_H + BOTTOM + 3 * ROW_H
+	local maxH = DETACH_H + BOTTOM + MAX_ROWS * ROW_H
+	if win.SetMinResize then
+		win:SetMinResize(280, minH)
+	end
+	if win.SetMaxResize then
+		win:SetMaxResize(760, maxH)
+	end
+	win:SetBackdrop(roundBackdrop(12))
+	win:SetBackdropColor(0.05, 0.04, 0.03, 0.82)
+	win:SetBackdropBorderColor(0.78, 0.58, 0.22, 1)
+	placePop(win)
+
+	local header = CreateFrame("Button", nil, win)
+	header:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -6)
+	header:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -6)
+	header:SetHeight(16)
+	header:SetBackdrop(panelBackdrop())
+	header:SetBackdropColor(0.34, 0.2, 0.06, 0.88)
+	header:SetBackdropBorderColor(0.72, 0.5, 0.16, 0.7)
+	header:RegisterForDrag("LeftButton")
+	header:SetScript("OnDragStart", function()
+		if not config().locked then
+			win.dragging = true
+			win:StartMoving()
+		end
+	end)
+	header:SetScript("OnDragStop", function()
+		win.dragging = false
+		win:StopMovingOrSizing()
+		if clampIntoView(win, 120, 20) then
+			noteClamped()
+		end
+		savePop(win)
+	end)
+
+	local brandBack = header:CreateTexture(nil, "ARTWORK")
+	brandBack:SetTexture(SOLID)
+	brandBack:SetVertexColor(0, 0, 0, 0.55)
+	brandBack:SetWidth(14)
+	brandBack:SetHeight(14)
+	brandBack:SetPoint("LEFT", header, "LEFT", 2, 0)
+	local brand = header:CreateTexture(nil, "OVERLAY")
+	brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+	brand:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	brand:SetWidth(12)
+	brand:SetHeight(12)
+	brand:SetPoint("CENTER", brandBack, "CENTER", 0, 0)
+	win.brand = brand
+	local brandText = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	brandText:SetPoint("LEFT", brandBack, "RIGHT", 4, 0)
+	brandText:SetJustifyH("LEFT")
+	brandText:SetText(VIEW_TITLE[mode] or "Spell Meter")
+	face(brandText, 10)
+	brandText:SetTextColor(1, 0.9, 0.62)
+	win.brandText = brandText
+
+	local closeBtn = CreateFrame("Button", nil, header)
+	closeBtn:SetPoint("RIGHT", header, "RIGHT", -3, 0)
+	closeBtn:SetWidth(14)
+	closeBtn:SetHeight(14)
+	closeBtn:SetBackdrop(roundBackdrop(8))
+	closeBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+	closeBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+	local closeText = closeBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	closeText:SetPoint("CENTER", closeBtn, "CENTER", 0, 0)
+	closeText:SetText("x")
+	face(closeText, 10)
+	closeText:SetTextColor(1, 0.86, 0.5)
+	closeBtn:SetScript("OnClick", function()
+		dock(mode)
+	end)
+	closeBtn:SetScript("OnEnter", function()
+		closeBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		showTip(this, "RIGHT", "Bring back", nil, {
+			{ "Close this window and show the view on the main meter.", 1, 1, 1 },
+		})
+	end)
+	closeBtn:SetScript("OnLeave", function()
+		closeBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		leaveTip()
+	end)
+
+	local resetBtn = CreateFrame("Button", nil, header)
+	resetBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+	resetBtn:SetHeight(14)
+	resetBtn:SetWidth(42)
+	resetBtn:SetBackdrop(roundBackdrop(8))
+	resetBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+	resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+	local resetText = resetBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0)
+	resetText:SetText("Reset")
+	face(resetText, 9)
+	resetText:SetTextColor(1, 0.86, 0.5)
+	resetBtn:SetScript("OnClick", function()
+		windowReset(false, mode)
+		refresh()
+		if mode == "healing" then
+			say("Reset. Healing starts over in this window. The built-in meter is unchanged.")
+		elseif mode == "boss" then
+			say("Reset. Boss damage starts over in this window. The built-in meter is unchanged.")
+		elseif mode == "taken" then
+			say("Reset. Damage taken starts over in this window.")
+		else
+			say("Reset. Damage and kills start over in this window. The built-in meter is unchanged.")
+		end
+	end)
+	resetBtn:SetScript("OnEnter", function()
+		resetBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+	end)
+	resetBtn:SetScript("OnLeave", function()
+		resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+	end)
+
+	local dpsBtn = CreateFrame("Button", nil, header)
+	dpsBtn:SetPoint("RIGHT", resetBtn, "LEFT", -8, 0)
+	dpsBtn:SetWidth(52)
+	dpsBtn:SetHeight(16)
+	local dpsText = dpsBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	dpsText:SetPoint("RIGHT", dpsBtn, "RIGHT", 0, 0)
+	dpsText:SetJustifyH("RIGHT")
+	dpsText:SetText("0 dps")
+	face(dpsText, 10)
+	dpsText:SetTextColor(0.78, 0.95, 0.72)
+	win.dpsText = dpsText
+	win.dpsBtn = dpsBtn
+
+	local totalBtn = CreateFrame("Button", nil, header)
+	totalBtn:SetPoint("RIGHT", dpsBtn, "LEFT", -10, 0)
+	totalBtn:SetWidth(48)
+	totalBtn:SetHeight(16)
+	local totalText = totalBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	totalText:SetPoint("RIGHT", totalBtn, "RIGHT", 0, 0)
+	totalText:SetJustifyH("RIGHT")
+	totalText:SetText("0")
+	face(totalText, 11)
+	totalText:SetTextColor(1, 0.9, 0.55)
+	win.totalText = totalText
+	win.totalBtn = totalBtn
+	brandText:SetPoint("RIGHT", totalBtn, "LEFT", -8, 0)
+
+	local cols = CreateFrame("Frame", nil, win)
+	cols:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -(DETACH_H - COL_H))
+	cols:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -(DETACH_H - COL_H))
+	cols:SetHeight(12)
+	win.cols = cols
+	local countText = cols:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	countText:SetPoint("LEFT", cols, "LEFT", 2, 0)
+	countText:SetJustifyH("LEFT")
+	countText:SetText("")
+	face(countText, 9)
+	countText:SetTextColor(0.55, 0.5, 0.4)
+	win.countText = countText
+	win.sortBtns = {}
+
+	local function makeSortButton(key, base, width, justify)
+		local btn = CreateFrame("Button", nil, cols)
+		btn:SetWidth(width)
+		btn:SetHeight(12)
+		btn.key = key
+		btn.base = base
+		local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		label:SetPoint("LEFT", btn, "LEFT", 0, 0)
+		label:SetPoint("RIGHT", btn, "RIGHT", 0, 0)
+		label:SetJustifyH(justify)
+		label:SetText(base)
+		face(label, 9)
+		label:SetTextColor(0.55, 0.5, 0.4)
+		btn.label = label
+		btn:SetScript("OnClick", function()
+			local cfg = config()
+			local picked = this.key
+			if (cfg.sort or "damage") == picked then
+				if cfg.sortDir == "asc" then
+					cfg.sortDir = "desc"
+				else
+					cfg.sortDir = "asc"
+				end
+			else
+				cfg.sort = picked
+				cfg.sortDir = "desc"
+			end
+			win.scrollPos = 0
+			refresh()
+		end)
+		table.insert(win.sortBtns, btn)
+		return btn
+	end
+
+	local dpsCol = makeSortButton("dps", "DPS", COL_DPS, "RIGHT")
+	dpsCol:SetPoint("RIGHT", cols, "RIGHT", -2, 0)
+	local dmgCol = makeSortButton("damage", "Damage", COL_DMG, "RIGHT")
+	dmgCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
+	local killCol = makeSortButton("kills", "Kills", COL_KILL, "RIGHT")
+	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -6, 0)
+	win.dpsCol = dpsCol
+	win.dmgCol = dmgCol
+	win.killCol = killCol
+
+	local scrollFrame = CreateFrame("ScrollFrame", nil, win)
+	scrollFrame:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -DETACH_H)
+	scrollFrame:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -DETACH_H)
+	scrollFrame:SetHeight(8 * ROW_H)
+	local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+	scrollChild:SetWidth(WIDTH - 16)
+	scrollChild:SetHeight(MAX_ROWS * ROW_H)
+	scrollFrame:SetScrollChild(scrollChild)
+	win.scroll = scrollFrame
+	win.scrollChild = scrollChild
+	local i
+	for i = 1, ROW_POOL do
+		win.rows[i] = createRow(scrollChild, i)
+		win.rows[i].win = win
+		win.rows[i]:SetWidth(WIDTH - 16)
+	end
+	local emptyText = win:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	emptyText:SetPoint("TOPLEFT", win, "TOPLEFT", 12, -(DETACH_H + 6))
+	emptyText:SetJustifyH("LEFT")
+	face(emptyText, 10)
+	emptyText:SetTextColor(0.62, 0.56, 0.46)
+	emptyText:Hide()
+	win.emptyText = emptyText
+
+	local function onWheel()
+		win.scrollPos = (win.scrollPos or 0) - (arg1 or 0) * ROW_H
+		refresh()
+	end
+	win:SetScript("OnMouseWheel", onWheel)
+	header:EnableMouseWheel(true)
+	header:SetScript("OnMouseWheel", onWheel)
+	scrollFrame:EnableMouseWheel(true)
+	scrollFrame:SetScript("OnMouseWheel", onWheel)
+	for i = 1, ROW_POOL do
+		win.rows[i]:EnableMouseWheel(true)
+		win.rows[i]:SetScript("OnMouseWheel", onWheel)
+		if win.rows[i].procBtns then
+			local pi
+			for pi = 1, 3 do
+				win.rows[i].procBtns[pi]:EnableMouseWheel(true)
+				win.rows[i].procBtns[pi]:SetScript("OnMouseWheel", onWheel)
+			end
+		end
+	end
+	cols:EnableMouseWheel(true)
+	cols:SetScript("OnMouseWheel", onWheel)
+	for i = 1, table.getn(win.sortBtns) do
+		win.sortBtns[i]:EnableMouseWheel(true)
+		win.sortBtns[i]:SetScript("OnMouseWheel", onWheel)
+	end
+	totalBtn:EnableMouseWheel(true)
+	totalBtn:SetScript("OnMouseWheel", onWheel)
+	dpsBtn:EnableMouseWheel(true)
+	dpsBtn:SetScript("OnMouseWheel", onWheel)
+	resetBtn:EnableMouseWheel(true)
+	resetBtn:SetScript("OnMouseWheel", onWheel)
+	closeBtn:EnableMouseWheel(true)
+	closeBtn:SetScript("OnMouseWheel", onWheel)
+
+	local grip = CreateFrame("Button", nil, win)
+	grip:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -2, 2)
+	grip:SetWidth(14)
+	grip:SetHeight(14)
+	grip:SetFrameLevel((win:GetFrameLevel() or 1) + 5)
+	grip:RegisterForDrag("LeftButton")
+	local gi
+	for gi = 1, 3 do
+		local mark = grip:CreateTexture(nil, "ARTWORK")
+		mark:SetTexture(SOLID)
+		mark:SetVertexColor(0.72, 0.56, 0.24, 0.95)
+		mark:SetWidth(gi * 3)
+		mark:SetHeight(1)
+		mark:SetPoint("BOTTOMRIGHT", grip, "BOTTOMRIGHT", -1, 1 + (gi - 1) * 3)
+	end
+	grip:SetScript("OnMouseDown", function()
+		if config().locked then
+			return
+		end
+		local scale = uiScale()
+		local cx, cy = GetCursorPosition()
+		win.sizeX = cx / scale
+		win.sizeY = cy / scale
+		win.sizeW = win:GetWidth()
+		win.sizeH = win:GetHeight()
+		win.sizing = true
+	end)
+	grip:SetScript("OnMouseUp", function()
+		if not win.sizing then
+			return
+		end
+		win.sizing = false
+		if clampIntoView(win, 120, 20) then
+			noteClamped()
+		end
+		savePop(win)
+		refresh()
+	end)
+	win:SetScript("OnUpdate", function()
+		if win.sizing then
+			if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
+				win.sizing = false
+				savePop(win)
+				refresh()
+			else
+				local scale = uiScale()
+				local cx, cy = GetCursorPosition()
+				cx = cx / scale
+				cy = cy / scale
+				local w = win.sizeW + (cx - win.sizeX)
+				local h = win.sizeH - (cy - win.sizeY)
+				if w < 280 then
+					w = 280
+				elseif w > 760 then
+					w = 760
+				end
+				if h < minH then
+					h = minH
+				elseif h > maxH then
+					h = maxH
+				end
+				win:SetWidth(w)
+				win:SetHeight(h)
+			end
+		end
+		if win.sizing or win.dragging then
+			win.clampWait = 0
+		else
+			win.clampWait = (win.clampWait or 0) + (arg1 or 0)
+			if win.clampWait >= 0.2 and clampIntoView(win, 120, 20) then
+				savePop(win)
+				noteClamped()
+			end
+		end
+	end)
+	win:Hide()
+	return win
+end
+
+detach = function(mode)
+	if not VIEW_TITLE[mode] then
+		return
+	end
+	if popped[mode] then
+		popped[mode]:Show()
+		refresh()
+		return
+	end
+	if viewMode() == mode then
+		local nextMode = otherHome(mode)
+		if not nextMode then
+			say("Bring another view back before opening this one on its own.")
+			return
+		end
+		config().viewChosen = 1
+		config().view = nextMode
+		scroll = 0
+	end
+	local win = built[mode]
+	if not win then
+		win = createDetached(mode)
+		built[mode] = win
+	end
+	popped[mode] = win
+	win:Show()
+	savePop(win)
+	refresh()
+end
+
+dock = function(mode)
+	local win = popped[mode]
+	popped[mode] = nil
+	if win then
+		win:Hide()
+		savePop(win)
+	end
+	local box = popBox(mode)
+	box.shown = false
+	config().viewChosen = 1
+	config().view = mode
+	scroll = 0
+	if frame and not frame:IsShown() then
+		config().shown = true
+		config().mini = false
+		applyShown()
+	end
+	refresh()
+end
+
+local function restorePops()
+	local cfg = config()
+	if not cfg.pops then
+		return
+	end
+	local mode, box
+	for mode, box in pairs(cfg.pops) do
+		if box.shown and VIEW_TITLE[mode] then
+			detach(mode)
+		end
+	end
+end
+
 
 local function createUI()
 	frame = CreateFrame("Frame", "AZSSpellMeterFrame", UIParent)
@@ -2358,7 +2949,22 @@ local function createUI()
 		label:SetText(spec.text)
 		face(label, 10)
 		btn.label = label
+		if btn.RegisterForClicks then
+			btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+		end
 		btn:SetScript("OnClick", function()
+			if arg1 == "RightButton" then
+				if popped[this.mode] then
+					dock(this.mode)
+				else
+					detach(this.mode)
+				end
+				return
+			end
+			if popped[this.mode] then
+				dock(this.mode)
+				return
+			end
 			if config().view == this.mode then
 				return
 			end
@@ -2368,16 +2974,23 @@ local function createUI()
 			refresh()
 		end)
 		btn:SetScript("OnEnter", function()
-			if config().view ~= this.mode then
+			if config().view ~= this.mode and not popped[this.mode] then
 				this:SetBackdropBorderColor(0.72, 0.56, 0.24, 1)
+			end
+			local extra = "Right-click to open it in its own window."
+			if popped[this.mode] then
+				extra = "Click to bring it back into this window."
 			end
 			showTip(this, "RIGHT", this.label:GetText(), nil, {
 				{ this.tip, 1, 1, 1 },
+				{ extra, 0.75, 0.75, 0.75 },
 			})
 		end)
 		btn:SetScript("OnLeave", function()
 			leaveTip()
-			if config().view == this.mode then
+			if popped[this.mode] then
+				this:SetBackdropBorderColor(0.4, 0.32, 0.16, 0.7)
+			elseif config().view == this.mode then
 				this:SetBackdropBorderColor(this.er, this.eg, this.eb, 1)
 			else
 				this:SetBackdropBorderColor(0.32, 0.22, 0.1, 1)
@@ -3031,6 +3644,9 @@ local function createUI()
 	end)
 	bubble:Hide()
 
+	frame.rows = rows
+	frame.headH = HEADER
+	restorePops()
 	applyShown()
 	refresh()
 	if config().shown == false and not toldHidden then
@@ -3161,6 +3777,20 @@ driver:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_DAMAGE")
 driver:RegisterEvent("CHAT_MSG_SPELL_PET_DAMAGE")
 driver:RegisterEvent("CHAT_MSG_COMBAT_PET_HITS")
 driver:SetScript("OnEvent", onEvent)
+driver:SetScript("OnUpdate", function()
+	if (frame and frame:IsShown()) or (bubble and bubble:IsShown()) then
+		return
+	end
+	if not anyMeterShown() then
+		return
+	end
+	driver.tick = (driver.tick or 0) + (arg1 or 0)
+	if driver.tick < 0.2 then
+		return
+	end
+	driver.tick = 0
+	refresh()
+end)
 
 local function toggleLock()
 	local cfg = config()
@@ -3178,7 +3808,9 @@ local function toggleShown()
 		cfg.shown = false
 		cfg.mini = false
 		applyShown()
-		restoreStockMeter()
+		if not anyMeterShown() then
+			restoreStockMeter()
+		end
 	else
 		cfg.shown = true
 		cfg.mini = false
@@ -3240,7 +3872,9 @@ SlashCmdList["AZSSPELLMETER"] = function(msg)
 		config().shown = false
 		config().mini = false
 		applyShown()
-		restoreStockMeter()
+		if not anyMeterShown() then
+			restoreStockMeter()
+		end
 	elseif msg == "reset" then
 		windowReset(true)
 		refresh()
