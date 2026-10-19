@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.22
+
+Tested with game 0.102.2.
+
+- Fixed the load error after the latest game update: `too many upvalues (limit=32)`. Relog to load it.
+- Tooltips show again on hover. The anchor name had been rewritten into something the game rejects.
+- The close and minimize marks sit in the middle of their buttons. Text uses a centered outline instead of a drop shadow.
+- Windows can sit against the right edge of the screen. Tooltips follow the cursor there too.
+- Resizing an extra window lets go when the mouse button does.
+- The title bar takes the color of the view it is showing.
+- Damage, Healing, Boss, and Taken stretch across the full width of the window.
+
 ## 1.21
 
 - Right-click Damage, Healing, Boss, or Taken to open that view in its own window. The button stays on the main window, dimmed.

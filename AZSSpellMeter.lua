@@ -11,21 +11,22 @@
 -- fit, so a resize can leave the last spell only partly in view.
 
 local ADDON = "AZSSpellMeter"
-local MAX_ROWS = 24
-local ROW_POOL = 25
-local ROW_H = 16
-local SOLID = "Interface\\Buttons\\WHITE8X8"
-local WIDTH = 348
-local TITLE_H = 18
-local MODE_H = 16
-local COL_H = 12
-local HEADER = 51
-local BOTTOM = 8
-local COL_KILL = 40
-local COL_DMG = 50
-local COL_DPS = 36
-
-local CLASS_SHEET = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes"
+local K = {
+	MAX_ROWS = 24,
+	ROW_POOL = 25,
+	ROW_H = 16,
+	SOLID = "Interface\\Buttons\\WHITE8X8",
+	WIDTH = 348,
+	MODE_H = 16,
+	COL_H = 12,
+	HEADER = 51,
+	BOTTOM = 8,
+	COL_KILL = 40,
+	COL_DMG = 50,
+	COL_DPS = 36,
+	DETACH_H = 35,
+	CLASS_SHEET = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes",
+}
 local CLASS_ICON = {
 	warrior = { 0, 0.25, 0, 0.25 },
 	mage = { 0.25, 0.49609375, 0, 0.25 },
@@ -65,12 +66,17 @@ local state
 local scroll = 0
 local popped = {}
 local built = {}
-local DETACH_H = 35
 local VIEW_TITLE = {
 	damage = "Damage",
 	healing = "Healing",
 	boss = "Boss",
 	taken = "Taken",
+}
+local HEADER_TINT = {
+	damage = { 0.42, 0.24, 0.06, 0.90, 0.66, 0.22 },
+	healing = { 0.10, 0.28, 0.14, 0.45, 0.78, 0.40 },
+	boss = { 0.40, 0.16, 0.06, 0.90, 0.45, 0.16 },
+	taken = { 0.36, 0.12, 0.10, 0.85, 0.35, 0.28 },
 }
 local scanAt = 0
 local lastRaw = ""
@@ -868,11 +874,11 @@ local function visibleRows()
 	if not frame then
 		return 8
 	end
-	local n = math.floor((frame:GetHeight() - HEADER - BOTTOM) / ROW_H + 0.001)
+	local n = math.floor((frame:GetHeight() - K.HEADER - K.BOTTOM) / K.ROW_H + 0.001)
 	if n < 1 then
 		n = 1
-	elseif n > MAX_ROWS then
-		n = MAX_ROWS
+	elseif n > K.MAX_ROWS then
+		n = K.MAX_ROWS
 	end
 	return n
 end
@@ -882,7 +888,7 @@ local function rowWidth(win)
 		win = frame
 	end
 	if not win then
-		return WIDTH - 16
+		return K.WIDTH - 16
 	end
 	local w = win:GetWidth() - 16
 	if w < 40 then
@@ -1352,11 +1358,11 @@ local function viewHeight(win)
 	if not win then
 		win = frame
 	end
-	local head = HEADER
+	local head = K.HEADER
 	if win and win.headH then
 		head = win.headH
 	end
-	local avail = 8 * ROW_H
+	local avail = 8 * K.ROW_H
 	if win then
 		avail = win:GetHeight() - head - 10
 	end
@@ -1370,7 +1376,7 @@ local function refreshWindow(win)
 	if not win or not state then
 		return
 	end
-	local headH = win.headH or HEADER
+	local headH = win.headH or K.HEADER
 	local listRows = win.rows or rows
 	local pos = scroll
 	if win ~= frame then
@@ -1378,7 +1384,7 @@ local function refreshWindow(win)
 	end
 	local n = rebuild(win.fixed)
 	local viewH = viewHeight(win)
-	local maxOff = n * ROW_H - viewH
+	local maxOff = n * K.ROW_H - viewH
 	if maxOff < 0 then
 		maxOff = 0
 	end
@@ -1388,18 +1394,18 @@ local function refreshWindow(win)
 		pos = maxOff
 	end
 	local first = 0
-	if ROW_H > 0 then
-		first = math.floor(pos / ROW_H)
+	if K.ROW_H > 0 then
+		first = math.floor(pos / K.ROW_H)
 	end
-	local shift = pos - first * ROW_H
+	local shift = pos - first * K.ROW_H
 	local shown = 0
 	if n > 0 then
-		shown = math.floor((shift + viewH - 0.001) / ROW_H) + 1
+		shown = math.floor((shift + viewH - 0.001) / K.ROW_H) + 1
 		if shown > n - first then
 			shown = n - first
 		end
-		if shown > ROW_POOL then
-			shown = ROW_POOL
+		if shown > K.ROW_POOL then
+			shown = K.ROW_POOL
 		end
 		if shown < 1 then
 			shown = 1
@@ -1412,8 +1418,8 @@ local function refreshWindow(win)
 		win.scroll:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -top)
 		if win.cols then
 			win.cols:ClearAllPoints()
-			win.cols:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -(top - COL_H))
-			win.cols:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -(top - COL_H))
+			win.cols:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -(top - K.COL_H))
+			win.cols:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -(top - K.COL_H))
 		end
 		win.scroll:SetHeight(viewH)
 		local sw = win.scroll:GetWidth()
@@ -1422,7 +1428,7 @@ local function refreshWindow(win)
 		end
 		if win.scrollChild then
 			win.scrollChild:SetWidth(sw)
-			local childH = shown * ROW_H
+			local childH = shown * K.ROW_H
 			if childH < viewH + shift then
 				childH = viewH + shift
 			end
@@ -1495,10 +1501,15 @@ local function refreshWindow(win)
 		end
 		win.brandText:SetText(title)
 		win.brandText:SetTextColor(1, 0.9, 0.62)
+		local tint = HEADER_TINT[mode]
+		if win.header and tint then
+			win.header:SetBackdropColor(tint[1], tint[2], tint[3], 0.92)
+			win.header:SetBackdropBorderColor(tint[4], tint[5], tint[6], 0.95)
+		end
 		if win.brand then
 			local coord = CLASS_ICON[classKey]
 			if coord then
-				win.brand:SetTexture(CLASS_SHEET)
+				win.brand:SetTexture(K.CLASS_SHEET)
 				win.brand:SetTexCoord(coord[1], coord[2], coord[3], coord[4])
 			else
 				win.brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
@@ -1551,7 +1562,7 @@ local function refreshWindow(win)
 			if mode == "healing" then
 				win.dmgCol:SetWidth(58)
 			else
-				win.dmgCol:SetWidth(COL_DMG)
+				win.dmgCol:SetWidth(K.COL_DMG)
 			end
 		end
 		if win.dpsCol then
@@ -1595,17 +1606,11 @@ local function refreshWindow(win)
 			end
 		end
 		local gap = 3
-		local inner = 0
-		if win.modes and win.modes.GetWidth then
-			inner = win.modes:GetWidth() or 0
-		end
+		local inner = (win:GetWidth() or K.WIDTH) - 16
 		if inner < 40 then
-			inner = (win:GetWidth() or WIDTH) - 16
+			inner = 40
 		end
-		local tabs = 4
-		if win.modeBtns then
-			tabs = table.getn(win.modeBtns)
-		end
+		local tabs = table.getn(win.modeBtns)
 		if tabs < 1 then
 			tabs = 1
 		end
@@ -1614,17 +1619,24 @@ local function refreshWindow(win)
 			bw = 8
 		end
 		local used = bw * tabs + gap * (tabs - 1)
-		local shift = math.floor((inner - used) / 2)
-		if shift < 0 then
-			shift = 0
+		local extra = inner - used
+		if extra < 0 then
+			extra = 0
 		end
+		local x = 0
 		for mi = 1, table.getn(win.modeBtns) do
 			local btn = win.modeBtns[mi]
-			btn:ClearAllPoints()
-			btn:SetWidth(bw)
-			if win.modes then
-				btn:SetPoint("LEFT", win.modes, "LEFT", shift + (mi - 1) * (bw + gap), 0)
+			local wide = bw
+			if extra > 0 then
+				wide = wide + 1
+				extra = extra - 1
 			end
+			btn:ClearAllPoints()
+			btn:SetWidth(wide)
+			if win.modes then
+				btn:SetPoint("LEFT", win.modes, "LEFT", x, 0)
+			end
+			x = x + wide + gap
 		end
 	end
 	if killView and (state.kills or 0) > 0 then
@@ -1645,7 +1657,7 @@ local function refreshWindow(win)
 	end
 
 	local i
-	for i = 1, ROW_POOL do
+	for i = 1, K.ROW_POOL do
 		local row = listRows[i]
 		local data = nil
 		if i <= shown then
@@ -1729,9 +1741,9 @@ local function refreshWindow(win)
 				textW = row.name:GetStringWidth() or 0
 			end
 			local px = 16 + textW + 4
-			local numW = COL_DMG + COL_DPS + 28
+			local numW = K.COL_DMG + K.COL_DPS + 28
 			if killView then
-				numW = numW + COL_KILL
+				numW = numW + K.COL_KILL
 			end
 			local limit = (row:GetWidth() or 0) - numW
 			if limit < 40 then
@@ -1856,8 +1868,9 @@ local function savePoint()
 end
 
 -- StartMoving does not stop at the screen edge on this client, and the saved
--- position survives a reinstall. Pull a frame back so its top-left stays on screen.
-local function clampIntoView(target, keepX, keepY)
+-- position survives a reinstall. Keep the whole frame on the real screen,
+-- including flush against the right and bottom edges.
+local function clampIntoView(target)
 	if not target or not target.GetLeft or not target:IsShown() then
 		return false
 	end
@@ -1868,47 +1881,58 @@ local function clampIntoView(target, keepX, keepY)
 	if not left or not top or not right or not bottom then
 		return false
 	end
-	local w = right - left
-	local h = top - bottom
-	if w < 8 or h < 8 then
-		return false
+	local scale = 1
+	if target.GetEffectiveScale then
+		scale = target:GetEffectiveScale() or 1
 	end
-	local sw, sh = 0, 0
-	if UIParent then
-		sw = UIParent:GetWidth() or 0
-		sh = UIParent:GetHeight() or 0
+	if not scale or scale <= 0 then
+		scale = 1
 	end
+	local sw = GetScreenWidth and GetScreenWidth() or 0
+	local sh = GetScreenHeight and GetScreenHeight() or 0
 	if sw < 100 or sh < 100 then
 		return false
 	end
-	if not keepX or keepX < 32 then
-		keepX = 32
-	end
-	if keepX > sw then
-		keepX = sw
-	end
-	if not keepY or keepY < 12 then
-		keepY = 12
-	end
-	if keepY > sh then
-		keepY = sh
-	end
-	local nl, nt = left, top
-	if left < -2 then
-		nl = 0
-	elseif left > sw - keepX + 2 then
-		nl = sw - keepX
-	end
-	if top > sh + 2 then
-		nt = sh
-	elseif top < keepY - 2 then
-		nt = keepY
-	end
-	if nl == left and nt == top then
+	left = left * scale
+	right = right * scale
+	top = top * scale
+	bottom = bottom * scale
+	local width = right - left
+	local height = top - bottom
+	if width < 8 or height < 8 then
 		return false
 	end
+	local nl, nt = left, top
+	if right > sw then
+		nl = sw - width
+	end
+	if nl < 0 then
+		nl = 0
+	end
+	if top > sh then
+		nt = sh
+	end
+	if nt - height < 0 then
+		nt = height
+	end
+	if math.abs(nl - left) < 0.5 and math.abs(nt - top) < 0.5 then
+		return false
+	end
+	local pscale = 1
+	if UIParent and UIParent.GetEffectiveScale then
+		pscale = UIParent:GetEffectiveScale() or 1
+	end
+	if not pscale or pscale <= 0 then
+		pscale = 1
+	end
+	local parentLeft = 0
+	local parentBottom = 0
+	if UIParent and UIParent.GetLeft then
+		parentLeft = (UIParent:GetLeft() or 0) * pscale
+		parentBottom = (UIParent:GetBottom() or 0) * pscale
+	end
 	target:ClearAllPoints()
-	target:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", nl, nt)
+	target:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", (nl - parentLeft) / pscale, (nt - parentBottom) / pscale)
 	return true
 end
 
@@ -1990,15 +2014,42 @@ local function placeDefault()
 end
 
 local function face(fs, size)
-	if fs and fs.SetFont then
+	if not fs then
+		return
+	end
+	if fs.SetFont then
 		fs:SetFont("Fonts\\FRIZQT__.TTF", size, "OUTLINE")
 	end
+	if fs.SetShadowColor then
+		fs:SetShadowColor(0, 0, 0, 1)
+	end
+	if fs.SetShadowOffset then
+		fs:SetShadowOffset(0, 0)
+	end
+end
+
+local function paintMinus(parent)
+	local bar = parent:CreateTexture(nil, "OVERLAY")
+	bar:SetTexture(K.SOLID)
+	bar:SetVertexColor(1, 0.86, 0.5)
+	bar:SetWidth(5)
+	bar:SetHeight(1)
+	bar:SetPoint("CENTER", parent, "CENTER", 0, 0)
+end
+
+local function paintX(parent)
+	local mark = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	mark:SetPoint("CENTER", parent, "CENTER", 1, 2)
+	mark:SetJustifyH("CENTER")
+	mark:SetText("x")
+	face(mark, 10)
+	mark:SetTextColor(1, 0.86, 0.5)
 end
 
 local function panelBackdrop()
 	return {
-		bgFile = SOLID,
-		edgeFile = SOLID,
+		bgFile = K.SOLID,
+		edgeFile = K.SOLID,
 		tile = false,
 		edgeSize = 1,
 		insets = { left = 1, right = 1, top = 1, bottom = 1 },
@@ -2048,30 +2099,46 @@ local function placeTip()
 	if not x or not y then
 		return
 	end
-	x = x / scale
-	y = y / scale
-	local tipW = tip:GetWidth() or 96
-	local tipH = tip:GetHeight() or 40
-	local screenW = 0
-	local screenH = 0
-	if UIParent then
-		screenW = UIParent:GetWidth() or 0
-		screenH = UIParent:GetHeight() or 0
+	local tipScale = scale
+	if tip.GetEffectiveScale then
+		tipScale = tip:GetEffectiveScale() or scale
 	end
+	if not tipScale or tipScale <= 0 then
+		tipScale = scale
+	end
+	local tipW = (tip:GetWidth() or 96) * tipScale
+	local tipH = (tip:GetHeight() or 40) * tipScale
+	local sw = GetScreenWidth and GetScreenWidth() or 0
+	local sh = GetScreenHeight and GetScreenHeight() or 0
 	local left = x - tipW / 2
 	if left < 2 then
 		left = 2
 	end
-	if screenW > 0 and left + tipW > screenW - 2 then
-		left = screenW - 2 - tipW
+	if sw > 0 and left + tipW > sw - 2 then
+		left = sw - 2 - tipW
 	end
 	local cx = left + tipW / 2
-	local gap = 14
+	local gap = 14 * tipScale
+	local parentScale = scale
+	local parentLeft = 0
+	local parentBottom = 0
+	if UIParent and UIParent.GetEffectiveScale then
+		parentScale = UIParent:GetEffectiveScale() or scale
+	end
+	if not parentScale or parentScale <= 0 then
+		parentScale = 1
+	end
+	if UIParent and UIParent.GetLeft then
+		parentLeft = (UIParent:GetLeft() or 0) * parentScale
+		parentBottom = (UIParent:GetBottom() or 0) * parentScale
+	end
+	local px = (cx - parentLeft) / parentScale
+	local py = (y - parentBottom) / parentScale
 	tip:ClearAllPoints()
-	if screenH > 0 and y + gap + tipH > screenH - 2 then
-		tip:SetPoint("TOP", UIParent, "BOTTOMLEFT", cx, y - 22)
+	if sh > 0 and y + gap + tipH > sh - 2 then
+		tip:SetPoint("TOP", UIParent, "BOTTOMLEFT", px, py - (22 * tipScale) / parentScale)
 	else
-		tip:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", cx, y + gap)
+		tip:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", px, py + gap / parentScale)
 	end
 end
 
@@ -2158,27 +2225,27 @@ end
 
 local function createRow(parent, index)
 	local row = CreateFrame("Button", nil, parent)
-	row:SetWidth(WIDTH - 16)
-	row:SetHeight(ROW_H)
-	row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_H))
+	row:SetWidth(K.WIDTH - 16)
+	row:SetHeight(K.ROW_H)
+	row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * K.ROW_H))
 
 	local bar = row:CreateTexture(nil, "BACKGROUND")
-	bar:SetTexture(SOLID)
+	bar:SetTexture(K.SOLID)
 	bar:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-	bar:SetHeight(ROW_H)
+	bar:SetHeight(K.ROW_H)
 	bar:SetWidth(1)
 	bar:SetVertexColor(0.42, 0.2, 0.08, 0.75)
 	row.bar = bar
 
 	local rule = row:CreateTexture(nil, "BORDER")
-	rule:SetTexture(SOLID)
+	rule:SetTexture(K.SOLID)
 	rule:SetVertexColor(0, 0, 0, 0.65)
 	rule:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
 	rule:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
 	rule:SetHeight(1)
 
 	local iconBg = row:CreateTexture(nil, "ARTWORK")
-	iconBg:SetTexture(SOLID)
+	iconBg:SetTexture(K.SOLID)
 	iconBg:SetVertexColor(0, 0, 0, 1)
 	iconBg:SetWidth(13)
 	iconBg:SetHeight(13)
@@ -2192,7 +2259,7 @@ local function createRow(parent, index)
 	row.icon = icon
 
 	local cd = row:CreateTexture(nil, "OVERLAY")
-	cd:SetTexture(SOLID)
+	cd:SetTexture(K.SOLID)
 	cd:SetWidth(11)
 	cd:SetHeight(2)
 	cd:SetPoint("BOTTOMLEFT", iconBg, "BOTTOMLEFT", 1, 0)
@@ -2207,21 +2274,21 @@ local function createRow(parent, index)
 	row.name = name
 
 	local kills = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	kills:SetWidth(COL_KILL)
+	kills:SetWidth(K.COL_KILL)
 	kills:SetJustifyH("RIGHT")
 	face(kills, 10)
 	kills:SetTextColor(1, 0.78, 0.45)
 	row.kills = kills
 
 	local damage = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	damage:SetWidth(COL_DMG)
+	damage:SetWidth(K.COL_DMG)
 	damage:SetJustifyH("RIGHT")
 	face(damage, 10)
 	damage:SetTextColor(1, 0.9, 0.55)
 	row.damage = damage
 
 	local rate = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	rate:SetWidth(COL_DPS)
+	rate:SetWidth(K.COL_DPS)
 	rate:SetJustifyH("RIGHT")
 	face(rate, 10)
 	rate:SetTextColor(0.7, 0.92, 0.68)
@@ -2390,12 +2457,12 @@ local function placePop(win)
 		width = frame:GetWidth()
 	end
 	if not height and frame then
-		height = frame:GetHeight() - (HEADER - DETACH_H)
+		height = frame:GetHeight() - (K.HEADER - K.DETACH_H)
 	end
 	if not width or width < 280 then
-		width = WIDTH
+		width = K.WIDTH
 	end
-	local minH = DETACH_H + BOTTOM + 3 * ROW_H
+	local minH = K.DETACH_H + K.BOTTOM + 3 * K.ROW_H
 	if not height or height < minH then
 		height = minH
 	end
@@ -2418,7 +2485,7 @@ end
 createDetached = function(mode)
 	local win = CreateFrame("Frame", "AZSSpellMeterPop" .. mode, UIParent)
 	win.fixed = mode
-	win.headH = DETACH_H
+	win.headH = K.DETACH_H
 	win.scrollPos = 0
 	win.rows = {}
 	win:SetFrameStrata("HIGH")
@@ -2428,13 +2495,16 @@ createDetached = function(mode)
 	if win.SetResizable then
 		win:SetResizable(true)
 	end
-	local minH = DETACH_H + BOTTOM + 3 * ROW_H
-	local maxH = DETACH_H + BOTTOM + MAX_ROWS * ROW_H
+	local minH = K.DETACH_H + K.BOTTOM + 3 * K.ROW_H
+	local maxH = K.DETACH_H + K.BOTTOM + K.MAX_ROWS * K.ROW_H
 	if win.SetMinResize then
 		win:SetMinResize(280, minH)
 	end
 	if win.SetMaxResize then
 		win:SetMaxResize(760, maxH)
+	end
+	if win.SetClampedToScreen then
+		win:SetClampedToScreen(false)
 	end
 	win:SetBackdrop(roundBackdrop(12))
 	win:SetBackdropColor(0.05, 0.04, 0.03, 0.82)
@@ -2448,6 +2518,7 @@ createDetached = function(mode)
 	header:SetBackdrop(panelBackdrop())
 	header:SetBackdropColor(0.34, 0.2, 0.06, 0.88)
 	header:SetBackdropBorderColor(0.72, 0.5, 0.16, 0.7)
+	win.header = header
 	header:RegisterForDrag("LeftButton")
 	header:SetScript("OnDragStart", function()
 		if not config().locked then
@@ -2465,7 +2536,7 @@ createDetached = function(mode)
 	end)
 
 	local brandBack = header:CreateTexture(nil, "ARTWORK")
-	brandBack:SetTexture(SOLID)
+	brandBack:SetTexture(K.SOLID)
 	brandBack:SetVertexColor(0, 0, 0, 0.55)
 	brandBack:SetWidth(14)
 	brandBack:SetHeight(14)
@@ -2492,11 +2563,7 @@ createDetached = function(mode)
 	closeBtn:SetBackdrop(roundBackdrop(8))
 	closeBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
 	closeBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
-	local closeText = closeBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	closeText:SetPoint("CENTER", closeBtn, "CENTER", 0, 0)
-	closeText:SetText("x")
-	face(closeText, 10)
-	closeText:SetTextColor(1, 0.86, 0.5)
+	paintX(closeBtn)
 	closeBtn:SetScript("OnClick", function()
 		dock(mode)
 	end)
@@ -2571,8 +2638,8 @@ createDetached = function(mode)
 	brandText:SetPoint("RIGHT", totalBtn, "LEFT", -8, 0)
 
 	local cols = CreateFrame("Frame", nil, win)
-	cols:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -(DETACH_H - COL_H))
-	cols:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -(DETACH_H - COL_H))
+	cols:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -(K.DETACH_H - K.COL_H))
+	cols:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -(K.DETACH_H - K.COL_H))
 	cols:SetHeight(12)
 	win.cols = cols
 	local countText = cols:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -2618,34 +2685,34 @@ createDetached = function(mode)
 		return btn
 	end
 
-	local dpsCol = makeSortButton("dps", "DPS", COL_DPS, "RIGHT")
+	local dpsCol = makeSortButton("dps", "DPS", K.COL_DPS, "RIGHT")
 	dpsCol:SetPoint("RIGHT", cols, "RIGHT", -2, 0)
-	local dmgCol = makeSortButton("damage", "Damage", COL_DMG, "RIGHT")
+	local dmgCol = makeSortButton("damage", "Damage", K.COL_DMG, "RIGHT")
 	dmgCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
-	local killCol = makeSortButton("kills", "Kills", COL_KILL, "RIGHT")
+	local killCol = makeSortButton("kills", "Kills", K.COL_KILL, "RIGHT")
 	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -6, 0)
 	win.dpsCol = dpsCol
 	win.dmgCol = dmgCol
 	win.killCol = killCol
 
 	local scrollFrame = CreateFrame("ScrollFrame", nil, win)
-	scrollFrame:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -DETACH_H)
-	scrollFrame:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -DETACH_H)
-	scrollFrame:SetHeight(8 * ROW_H)
+	scrollFrame:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -K.DETACH_H)
+	scrollFrame:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -K.DETACH_H)
+	scrollFrame:SetHeight(8 * K.ROW_H)
 	local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-	scrollChild:SetWidth(WIDTH - 16)
-	scrollChild:SetHeight(MAX_ROWS * ROW_H)
+	scrollChild:SetWidth(K.WIDTH - 16)
+	scrollChild:SetHeight(K.MAX_ROWS * K.ROW_H)
 	scrollFrame:SetScrollChild(scrollChild)
 	win.scroll = scrollFrame
 	win.scrollChild = scrollChild
 	local i
-	for i = 1, ROW_POOL do
+	for i = 1, K.ROW_POOL do
 		win.rows[i] = createRow(scrollChild, i)
 		win.rows[i].win = win
-		win.rows[i]:SetWidth(WIDTH - 16)
+		win.rows[i]:SetWidth(K.WIDTH - 16)
 	end
 	local emptyText = win:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	emptyText:SetPoint("TOPLEFT", win, "TOPLEFT", 12, -(DETACH_H + 6))
+	emptyText:SetPoint("TOPLEFT", win, "TOPLEFT", 12, -(K.DETACH_H + 6))
 	emptyText:SetJustifyH("LEFT")
 	face(emptyText, 10)
 	emptyText:SetTextColor(0.62, 0.56, 0.46)
@@ -2653,7 +2720,7 @@ createDetached = function(mode)
 	win.emptyText = emptyText
 
 	local function onWheel()
-		win.scrollPos = (win.scrollPos or 0) - (arg1 or 0) * ROW_H
+		win.scrollPos = (win.scrollPos or 0) - (arg1 or 0) * K.ROW_H
 		refresh()
 	end
 	win:SetScript("OnMouseWheel", onWheel)
@@ -2661,7 +2728,7 @@ createDetached = function(mode)
 	header:SetScript("OnMouseWheel", onWheel)
 	scrollFrame:EnableMouseWheel(true)
 	scrollFrame:SetScript("OnMouseWheel", onWheel)
-	for i = 1, ROW_POOL do
+	for i = 1, K.ROW_POOL do
 		win.rows[i]:EnableMouseWheel(true)
 		win.rows[i]:SetScript("OnMouseWheel", onWheel)
 		if win.rows[i].procBtns then
@@ -2692,11 +2759,10 @@ createDetached = function(mode)
 	grip:SetWidth(14)
 	grip:SetHeight(14)
 	grip:SetFrameLevel((win:GetFrameLevel() or 1) + 5)
-	grip:RegisterForDrag("LeftButton")
 	local gi
 	for gi = 1, 3 do
 		local mark = grip:CreateTexture(nil, "ARTWORK")
-		mark:SetTexture(SOLID)
+		mark:SetTexture(K.SOLID)
 		mark:SetVertexColor(0.72, 0.56, 0.24, 0.95)
 		mark:SetWidth(gi * 3)
 		mark:SetHeight(1)
@@ -2829,14 +2895,157 @@ local function restorePops()
 	end
 end
 
+local function finishMainSize()
+	if not sizing then
+		return
+	end
+	sizing = false
+	if frame.SetClampedToScreen then
+		frame:SetClampedToScreen(false)
+	end
+	if clampIntoView(frame) then
+		noteClamped()
+	end
+	local saved = config()
+	saved.width = frame:GetWidth()
+	saved.height = frame:GetHeight()
+	savePoint()
+	refresh()
+end
 
-local function createUI()
+local function onMainGripDown()
+	if config().locked then
+		return
+	end
+	local scale = uiScale()
+	local cx, cy = GetCursorPosition()
+	sizeX = cx / scale
+	sizeY = cy / scale
+	sizeW = frame:GetWidth()
+	sizeH = frame:GetHeight()
+	sizing = true
+	if frame.SetClampedToScreen then
+		frame:SetClampedToScreen(false)
+	end
+	pinTopLeft()
+end
+
+local function onMainWheel()
+	scroll = scroll - (arg1 or 0) * K.ROW_H
+	refresh()
+end
+
+local function onMainUpdate()
+	if sizing then
+		if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
+			finishMainSize()
+		else
+			local scale = uiScale()
+			local cx, cy = GetCursorPosition()
+			cx = cx / scale
+			cy = cy / scale
+			local w = sizeW + (cx - sizeX)
+			local h = sizeH - (cy - sizeY)
+			local minH = K.HEADER + K.BOTTOM + 3 * K.ROW_H
+			local maxH = K.HEADER + K.BOTTOM + K.MAX_ROWS * K.ROW_H
+			if w < 280 then
+				w = 280
+			elseif w > 760 then
+				w = 760
+			end
+			if h < minH then
+				h = minH
+			elseif h > maxH then
+				h = maxH
+			end
+			frame:SetWidth(w)
+			frame:SetHeight(h)
+		end
+	end
+	if sizing or dragging or not frame:IsShown() then
+		frame.clampWait = 0
+	else
+		frame.clampWait = (frame.clampWait or 0) + (arg1 or 0)
+		if frame.clampWait >= 0.2 and clampIntoView(frame, 120, 20) then
+			savePoint()
+			noteClamped()
+		end
+	end
+	local now = GetTime()
+	if scanAt > 0 and now >= scanAt then
+		scanAt = 0
+		scanIcons()
+	end
+	local w, h = frame:GetWidth(), frame:GetHeight()
+	if w ~= lastW or h ~= lastH then
+		lastW, lastH = w, h
+		local n
+		local rw = rowWidth()
+		for n = 1, K.ROW_POOL do
+			rows[n]:SetWidth(rw)
+		end
+	end
+	if watchBoot and sameLevelRestart() then
+		watchBoot = false
+		checkLevel()
+		refresh()
+	end
+	frame.tick = (frame.tick or 0) + (arg1 or 0)
+	if frame.tick >= 0.2 then
+		frame.tick = 0
+		if frame:IsShown() then
+			refresh()
+		end
+	end
+	if tipFill then
+		tipFill()
+	end
+	placeTip()
+end
+
+local function onBubbleUpdate()
+	if config().mini and not bubble.parked then
+		if not bubble.measuring then
+			frame:Show()
+			bubble.measuring = true
+			return
+		end
+		if clampIntoView(frame, 120, 20) then
+			savePoint()
+			noteClamped()
+		end
+		local x, y
+		if frame.minBtn then
+			x, y = frame.minBtn:GetCenter()
+		end
+		frame:Hide()
+		bubble.measuring = nil
+		if x and y then
+			bubble:ClearAllPoints()
+			bubble:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
+			bubble.parked = true
+		end
+	end
+	if config().mini and bubble.parked and not bubble.moving and clampIntoView(bubble, 36, 18) then
+		noteClamped()
+	end
+	if not config().mini then
+		return
+	end
+	bubble.tick = (bubble.tick or 0) + (arg1 or 0)
+	if bubble.tick >= 0.2 then
+		bubble.tick = 0
+		refresh()
+	end
+end
+
+local function buildMainChrome()
 	frame = CreateFrame("Frame", "AZSSpellMeterFrame", UIParent)
 	local cfg = config()
-	local h = cfg.height or (HEADER + BOTTOM + 8 * ROW_H)
+	local h = cfg.height or (K.HEADER + K.BOTTOM + 8 * K.ROW_H)
 	if not cfg.headerGrow then
 		if cfg.height then
-			h = cfg.height + MODE_H
+			h = cfg.height + K.MODE_H
 		end
 		cfg.headerGrow = 1
 		cfg.height = h
@@ -2849,11 +3058,11 @@ local function createUI()
 	end
 	cfg.colGrow = 1
 	cfg.colTight = 1
-	local minH = HEADER + BOTTOM + 3 * ROW_H
+	local minH = K.HEADER + K.BOTTOM + 3 * K.ROW_H
 	if h < minH then
 		h = minH
 	end
-	frame:SetWidth(cfg.width or WIDTH)
+	frame:SetWidth(cfg.width or K.WIDTH)
 	frame:SetHeight(h)
 	frame:SetFrameStrata("HIGH")
 	frame:SetMovable(true)
@@ -2863,13 +3072,13 @@ local function createUI()
 		frame:SetResizable(true)
 	end
 	if frame.SetMinResize then
-		frame:SetMinResize(280, HEADER + BOTTOM + 3 * ROW_H)
+		frame:SetMinResize(280, K.HEADER + K.BOTTOM + 3 * K.ROW_H)
 	end
 	if frame.SetMaxResize then
-		frame:SetMaxResize(760, HEADER + BOTTOM + MAX_ROWS * ROW_H)
+		frame:SetMaxResize(760, K.HEADER + K.BOTTOM + K.MAX_ROWS * K.ROW_H)
 	end
 	if frame.SetClampedToScreen then
-		frame:SetClampedToScreen(true)
+		frame:SetClampedToScreen(false)
 	end
 	frame:SetBackdrop(roundBackdrop(12))
 	frame:SetBackdropColor(0.05, 0.04, 0.03, 0.82)
@@ -2884,6 +3093,7 @@ local function createUI()
 	header:SetBackdrop(panelBackdrop())
 	header:SetBackdropColor(0.34, 0.2, 0.06, 0.88)
 	header:SetBackdropBorderColor(0.72, 0.5, 0.16, 0.7)
+	frame.header = header
 	header:RegisterForDrag("LeftButton")
 	header:SetScript("OnDragStart", function()
 		if not config().locked then
@@ -2901,7 +3111,7 @@ local function createUI()
 	end)
 
 	local brandBack = header:CreateTexture(nil, "ARTWORK")
-	brandBack:SetTexture(SOLID)
+	brandBack:SetTexture(K.SOLID)
 	brandBack:SetVertexColor(0, 0, 0, 0.55)
 	brandBack:SetWidth(14)
 	brandBack:SetHeight(14)
@@ -2924,7 +3134,7 @@ local function createUI()
 	local modes = CreateFrame("Frame", nil, frame)
 	modes:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -23)
 	modes:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -23)
-	modes:SetHeight(MODE_H)
+	modes:SetHeight(K.MODE_H)
 	frame.modeBtns = {}
 	frame.modes = modes
 	local modeSpec = {
@@ -2937,7 +3147,7 @@ local function createUI()
 	for msi = 1, table.getn(modeSpec) do
 		local spec = modeSpec[msi]
 		local btn = CreateFrame("Button", nil, modes)
-		btn:SetHeight(MODE_H)
+		btn:SetHeight(K.MODE_H)
 		btn.mode = spec.mode
 		btn.tip = spec.tip
 		btn.tr, btn.tg, btn.tb = spec.tr, spec.tg, spec.tb
@@ -3006,11 +3216,7 @@ local function createUI()
 	minBtn:SetBackdrop(roundBackdrop(8))
 	minBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
 	minBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
-	local minText = minBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	minText:SetPoint("CENTER", minBtn, "CENTER", 0, 1)
-	minText:SetText("-")
-	face(minText, 12)
-	minText:SetTextColor(1, 0.86, 0.5)
+	paintMinus(minBtn)
 	minBtn:SetScript("OnClick", function()
 		config().mini = true
 		local x, y = minBtn:GetCenter()
@@ -3034,6 +3240,7 @@ local function createUI()
 		minBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
 		leaveTip()
 	end)
+	frame.minBtn = minBtn
 
 	local resetBtn = CreateFrame("Button", nil, header)
 	resetBtn:SetPoint("RIGHT", minBtn, "LEFT", -4, 0)
@@ -3238,8 +3445,8 @@ local function createUI()
 	end)
 
 	local cols = CreateFrame("Frame", nil, frame)
-	cols:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -(HEADER - COL_H))
-	cols:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(HEADER - COL_H))
+	cols:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -(K.HEADER - K.COL_H))
+	cols:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(K.HEADER - K.COL_H))
 	cols:SetHeight(12)
 	frame.cols = cols
 	local countText = cols:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -3314,36 +3521,46 @@ local function createUI()
 		return btn
 	end
 
-	local dpsCol = makeSortButton("dps", "DPS", COL_DPS, "RIGHT")
+	local dpsCol = makeSortButton("dps", "DPS", K.COL_DPS, "RIGHT")
 	dpsCol:SetPoint("RIGHT", cols, "RIGHT", -2, 0)
-	local dmgCol = makeSortButton("damage", "Damage", COL_DMG, "RIGHT")
+	local dmgCol = makeSortButton("damage", "Damage", K.COL_DMG, "RIGHT")
 	dmgCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
-	local killCol = makeSortButton("kills", "Kills", COL_KILL, "RIGHT")
+	local killCol = makeSortButton("kills", "Kills", K.COL_KILL, "RIGHT")
 	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -6, 0)
 	frame.dpsCol = dpsCol
 	frame.dmgCol = dmgCol
 	frame.killCol = killCol
+end
 
+local function buildMainList()
+	local cfg = config()
+	local header = frame.header
+	local minBtn = frame.minBtn
+	local resetBtn = frame.resetBtn
+	local dpsBtn = frame.dpsBtn
+	local totalBtn = frame.totalBtn
+	local cols = frame.cols
+	local modes = frame.modes
 	local scrollFrame = CreateFrame("ScrollFrame", "AZSSpellMeterScroll", frame)
-	scrollFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -HEADER)
-	scrollFrame:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -HEADER)
-	scrollFrame:SetHeight(8 * ROW_H)
+	scrollFrame:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -K.HEADER)
+	scrollFrame:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -K.HEADER)
+	scrollFrame:SetHeight(8 * K.ROW_H)
 	scrollFrame:EnableMouseWheel(true)
 	local scrollChild = CreateFrame("Frame", "AZSSpellMeterScrollChild", scrollFrame)
-	scrollChild:SetWidth((cfg.width or WIDTH) - 16)
-	scrollChild:SetHeight((MAX_ROWS) * ROW_H)
+	scrollChild:SetWidth((cfg.width or K.WIDTH) - 16)
+	scrollChild:SetHeight((K.MAX_ROWS) * K.ROW_H)
 	scrollFrame:SetScrollChild(scrollChild)
 	frame.scroll = scrollFrame
 	frame.scrollChild = scrollChild
 
 	local i
-	for i = 1, ROW_POOL do
+	for i = 1, K.ROW_POOL do
 		rows[i] = createRow(scrollChild, i)
-		rows[i]:SetWidth((cfg.width or WIDTH) - 16)
+		rows[i]:SetWidth((cfg.width or K.WIDTH) - 16)
 	end
 
 	local emptyText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	emptyText:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -(HEADER + 6))
+	emptyText:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -(K.HEADER + 6))
 	face(emptyText, 11)
 	emptyText:SetTextColor(0.62, 0.56, 0.46)
 	emptyText:Hide()
@@ -3357,7 +3574,7 @@ local function createUI()
 	local gi
 	for gi = 1, 3 do
 		local mark = grip:CreateTexture(nil, "OVERLAY")
-		mark:SetTexture(SOLID)
+		mark:SetTexture(K.SOLID)
 		mark:SetVertexColor(0.72, 0.56, 0.24, 0.95)
 		mark:SetWidth(gi * 3)
 		mark:SetHeight(1)
@@ -3369,55 +3586,21 @@ local function createUI()
 	grip:SetScript("OnLeave", function()
 		leaveTip()
 	end)
-	local function finishSize()
-		if not sizing then
-			return
-		end
-		sizing = false
-		if frame.SetClampedToScreen then
-			frame:SetClampedToScreen(true)
-		end
-		if clampIntoView(frame, 120, 20) then
-			noteClamped()
-		end
-		local saved = config()
-		saved.width = frame:GetWidth()
-		saved.height = frame:GetHeight()
-		savePoint()
-		refresh()
-	end
-	grip:SetScript("OnMouseDown", function()
-		if config().locked then
-			return
-		end
-		local scale = uiScale()
-		local cx, cy = GetCursorPosition()
-		sizeX = cx / scale
-		sizeY = cy / scale
-		sizeW = frame:GetWidth()
-		sizeH = frame:GetHeight()
-		sizing = true
-		if frame.SetClampedToScreen then
-			frame:SetClampedToScreen(false)
-		end
-		pinTopLeft()
-	end)
-	grip:SetScript("OnMouseUp", function()
-		finishSize()
-	end)
+	grip:SetScript("OnMouseDown", onMainGripDown)
+	grip:SetScript("OnMouseUp", finishMainSize)
 
 	local tip = CreateFrame("Frame", "AZSSpellMeterTip", UIParent)
 	tip:SetFrameStrata("TOOLTIP")
 	tip:SetWidth(160)
 	tip:SetHeight(40)
 	if tip.SetClampedToScreen then
-		tip:SetClampedToScreen(true)
+		tip:SetClampedToScreen(false)
 	end
 	tip:SetBackdrop(roundBackdrop(12))
 	tip:SetBackdropColor(0.05, 0.04, 0.03, 0.9)
 	tip:SetBackdropBorderColor(0.78, 0.58, 0.22, 1)
 	local iconBack = tip:CreateTexture(nil, "ARTWORK")
-	iconBack:SetTexture(SOLID)
+	iconBack:SetTexture(K.SOLID)
 	iconBack:SetVertexColor(0, 0, 0, 1)
 	iconBack:SetWidth(24)
 	iconBack:SetHeight(24)
@@ -3448,112 +3631,42 @@ local function createUI()
 	tip:Hide()
 	frame.tip = tip
 
-	local function onWheel(delta)
-		scroll = scroll - (delta or arg1 or 0) * ROW_H
-		refresh()
-	end
-	frame:SetScript("OnMouseWheel", onWheel)
+	frame:SetScript("OnMouseWheel", onMainWheel)
 	header:EnableMouseWheel(true)
-	header:SetScript("OnMouseWheel", onWheel)
+	header:SetScript("OnMouseWheel", onMainWheel)
 	grip:EnableMouseWheel(true)
-	grip:SetScript("OnMouseWheel", onWheel)
-	for i = 1, ROW_POOL do
+	grip:SetScript("OnMouseWheel", onMainWheel)
+	for i = 1, K.ROW_POOL do
 		rows[i]:EnableMouseWheel(true)
-		rows[i]:SetScript("OnMouseWheel", onWheel)
+		rows[i]:SetScript("OnMouseWheel", onMainWheel)
 		local pi
 		for pi = 1, 3 do
-			rows[i].procBtns[pi]:SetScript("OnMouseWheel", onWheel)
+			rows[i].procBtns[pi]:SetScript("OnMouseWheel", onMainWheel)
 		end
 	end
-	scrollFrame:SetScript("OnMouseWheel", onWheel)
+	scrollFrame:SetScript("OnMouseWheel", onMainWheel)
 	cols:EnableMouseWheel(true)
-	cols:SetScript("OnMouseWheel", onWheel)
+	cols:SetScript("OnMouseWheel", onMainWheel)
 	for i = 1, table.getn(frame.sortBtns) do
 		frame.sortBtns[i]:EnableMouseWheel(true)
-		frame.sortBtns[i]:SetScript("OnMouseWheel", onWheel)
+		frame.sortBtns[i]:SetScript("OnMouseWheel", onMainWheel)
 	end
 	totalBtn:EnableMouseWheel(true)
-	totalBtn:SetScript("OnMouseWheel", onWheel)
+	totalBtn:SetScript("OnMouseWheel", onMainWheel)
 	dpsBtn:EnableMouseWheel(true)
-	dpsBtn:SetScript("OnMouseWheel", onWheel)
+	dpsBtn:SetScript("OnMouseWheel", onMainWheel)
 	modes:EnableMouseWheel(true)
-	modes:SetScript("OnMouseWheel", onWheel)
+	modes:SetScript("OnMouseWheel", onMainWheel)
 	local mwi
 	for mwi = 1, table.getn(frame.modeBtns) do
 		frame.modeBtns[mwi]:EnableMouseWheel(true)
-		frame.modeBtns[mwi]:SetScript("OnMouseWheel", onWheel)
+		frame.modeBtns[mwi]:SetScript("OnMouseWheel", onMainWheel)
 	end
 	resetBtn:EnableMouseWheel(true)
-	resetBtn:SetScript("OnMouseWheel", onWheel)
+	resetBtn:SetScript("OnMouseWheel", onMainWheel)
 	minBtn:EnableMouseWheel(true)
-	minBtn:SetScript("OnMouseWheel", onWheel)
-	frame:SetScript("OnUpdate", function()
-		if sizing then
-			if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
-				finishSize()
-			else
-				local scale = uiScale()
-				local cx, cy = GetCursorPosition()
-				cx = cx / scale
-				cy = cy / scale
-				local w = sizeW + (cx - sizeX)
-				local h = sizeH - (cy - sizeY)
-				local minH = HEADER + BOTTOM + 3 * ROW_H
-				local maxH = HEADER + BOTTOM + MAX_ROWS * ROW_H
-				if w < 280 then
-					w = 280
-				elseif w > 760 then
-					w = 760
-				end
-				if h < minH then
-					h = minH
-				elseif h > maxH then
-					h = maxH
-				end
-				frame:SetWidth(w)
-				frame:SetHeight(h)
-			end
-		end
-		if sizing or dragging or not frame:IsShown() then
-			frame.clampWait = 0
-		else
-			frame.clampWait = (frame.clampWait or 0) + (arg1 or 0)
-			if frame.clampWait >= 0.2 and clampIntoView(frame, 120, 20) then
-				savePoint()
-				noteClamped()
-			end
-		end
-		local now = GetTime()
-		if scanAt > 0 and now >= scanAt then
-			scanAt = 0
-			scanIcons()
-		end
-		local w, h = frame:GetWidth(), frame:GetHeight()
-		if w ~= lastW or h ~= lastH then
-			lastW, lastH = w, h
-			local n
-			local rw = rowWidth()
-			for n = 1, ROW_POOL do
-				rows[n]:SetWidth(rw)
-			end
-		end
-		if watchBoot and sameLevelRestart() then
-			watchBoot = false
-			checkLevel()
-			refresh()
-		end
-		frame.tick = (frame.tick or 0) + (arg1 or 0)
-		if frame.tick >= 0.2 then
-			frame.tick = 0
-			if frame:IsShown() then
-				refresh()
-			end
-		end
-		if tipFill then
-			tipFill()
-		end
-		placeTip()
-	end)
+	minBtn:SetScript("OnMouseWheel", onMainWheel)
+	frame:SetScript("OnUpdate", onMainUpdate)
 
 	bubble = CreateFrame("Button", "AZSSpellMeterBubble", UIParent)
 	bubble:SetFrameStrata("HIGH")
@@ -3564,7 +3677,7 @@ local function createUI()
 	bubble:RegisterForDrag("LeftButton")
 	bubble:RegisterForClicks("LeftButtonUp")
 	if bubble.SetClampedToScreen then
-		bubble:SetClampedToScreen(true)
+		bubble:SetClampedToScreen(false)
 	end
 	bubble:SetBackdrop(roundBackdrop(12))
 	bubble:SetBackdropColor(0.28, 0.16, 0.05, 0.9)
@@ -3577,12 +3690,12 @@ local function createUI()
 	face(bubbleText, 11)
 	bubbleText:SetTextColor(1, 0.9, 0.55)
 	frame.bubbleText = bubbleText
-	local bubbleDrag = false
+	bubble.moving = false
 	bubble:SetScript("OnDragStart", function()
 		if config().locked then
 			return
 		end
-		bubbleDrag = true
+		bubble.moving = true
 		bubble:StartMoving()
 	end)
 	bubble:SetScript("OnDragStop", function()
@@ -3592,8 +3705,8 @@ local function createUI()
 		end
 	end)
 	bubble:SetScript("OnClick", function()
-		if bubbleDrag then
-			bubbleDrag = false
+		if bubble.moving then
+			bubble.moving = false
 			return
 		end
 		config().mini = false
@@ -3610,42 +3723,11 @@ local function createUI()
 		bubble:SetBackdropBorderColor(0.85, 0.62, 0.2, 1)
 		leaveTip()
 	end)
-	bubble:SetScript("OnUpdate", function()
-		if config().mini and not bubble.parked then
-			if not bubble.measuring then
-				frame:Show()
-				bubble.measuring = true
-				return
-			end
-			if clampIntoView(frame, 120, 20) then
-				savePoint()
-				noteClamped()
-			end
-			local x, y = minBtn:GetCenter()
-			frame:Hide()
-			bubble.measuring = nil
-			if x and y then
-				bubble:ClearAllPoints()
-				bubble:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
-				bubble.parked = true
-			end
-		end
-		if config().mini and bubble.parked and not bubbleDrag and clampIntoView(bubble, 36, 18) then
-			noteClamped()
-		end
-		if not config().mini then
-			return
-		end
-		bubble.tick = (bubble.tick or 0) + (arg1 or 0)
-		if bubble.tick >= 0.2 then
-			bubble.tick = 0
-			refresh()
-		end
-	end)
+	bubble:SetScript("OnUpdate", onBubbleUpdate)
 	bubble:Hide()
 
 	frame.rows = rows
-	frame.headH = HEADER
+	frame.headH = K.HEADER
 	restorePops()
 	applyShown()
 	refresh()
@@ -3653,6 +3735,11 @@ local function createUI()
 		toldHidden = true
 		say("The window is hidden. Type /azsm to show it.")
 	end
+end
+
+local function createUI()
+	buildMainChrome()
+	buildMainList()
 end
 
 local function onCreatureDeath(msg)
