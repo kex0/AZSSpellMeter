@@ -1,6 +1,6 @@
 # AZS Spell Meter
 
-Per-spell damage for [Azeroth Survivors](https://wow.aethus.pl/). Damage, DPS, and each spell's share come from the game's own meter, so they match **Damage Done**. Kills are counted on top of that, and a proc is shown on the spell it actually casts.
+Per-spell damage for [Azeroth Survivors](https://wow.aethus.pl/). Damage and each spell's share come from the game's own meter, so they match **Damage Done**. DPS is the last 10 seconds of the run. Kills are counted on top of that, and a proc is shown on the spell it actually casts.
 
 ![AZS Spell Meter](preview.png)
 
@@ -26,7 +26,7 @@ Requires Azeroth Survivors 0.87 or newer, for `AZS_GetMeter`. Healing, Boss, and
 
 Drag the title bar, or the damage and DPS numbers, to move the window. Drag the corner to resize it. If the list is longer than the window, the last spell sits partly in view. Scroll with the mouse wheel.
 
-Damage, Healing, Boss, and Taken are the buttons under the title. Damage includes kills per spell. Healing is health actually restored. Boss is the last boss fight, and it stays up until the next boss. Taken is the damage you took, split by what hit you. A thin bar under a spell icon is its cooldown. Hover the total for your build stats.
+Damage, Healing, Boss, and Taken are the buttons under the title. Damage includes kills per spell. Healing is health actually restored. Boss is the last boss fight, and it stays up until the next boss. Taken is the damage you took, split by what hit you. DPS is the last 10 seconds of the run. A thin bar under a spell icon is its cooldown. Hover the total for your build stats.
 
 The gear on the title bar opens settings: scale, opacity, background, colors, cooldown bars, and lock. Right-click the bubble for the same window. Reset settings there puts those back. Your numbers and window positions stay.
 
@@ -45,6 +45,12 @@ While the main window, its bubble, or an extra window is open, the built-in Dama
 The window position is remembered across updates. Deleting the addon folder does not clear it. If the window is missing, type `/azsm resetpos`.
 
 ## Changelog
+
+### 1.24
+
+Tested with game 0.104.0.
+
+- DPS is the last 10 seconds of the run. Kills from the English combat log stay on the translated spell row.
 
 ### 1.23
 

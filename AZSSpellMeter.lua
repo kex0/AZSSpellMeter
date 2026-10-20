@@ -4,7 +4,9 @@
 -- A thin bar on a row is that spell's cooldown. The total's tooltip lists build stats.
 -- Reset remembers the numbers for the view you are on and shows only what it adds afterwards.
 -- Kills are credited from the combat log on the damage view. They keep counting
--- while another view is open, and they are not drawn there.
+-- while another view is open, and they are not drawn there. The log names spells
+-- in English; a localized meter is joined to those kills by the spell icon.
+-- DPS is the last 10 seconds of the run clock, not the average since the start.
 -- A proc is grouped onto the spell it casts (Pyroclasm onto Blast Wave). The row
 -- is that spell; the proc's own numbers are on its button.
 -- Rows sit in a scroll frame at a fixed height. The frame clips whatever does not
@@ -557,10 +559,83 @@ local function ingest(msg, kind)
 	end
 end
 
+local RATE_WINDOW = 10
+local rateHist = {}
+
+local function clearRecentRate(mode)
+	if not mode then
+		rateHist = {}
+		return
+	end
+	rateHist[mode] = nil
+end
+
+-- Damage now, minus the sample from about 10 seconds of run time ago.
+-- The first second keeps the meter's own average so the number does not spike.
+local function recentRate(mode, now, total, bucket)
+	if not mode or mode == "" then
+		return nil
+	end
+	if not now or now < 0 then
+		now = 0
+	end
+	local hist = rateHist[mode]
+	if not hist then
+		hist = {}
+		rateHist[mode] = hist
+	end
+	local n = table.getn(hist)
+	if n > 0 and hist[n].t > now + 0.05 then
+		hist = {}
+		rateHist[mode] = hist
+		n = 0
+	end
+	local last = nil
+	if n > 0 then
+		last = hist[n]
+	end
+	if not last or (now - last.t) >= 0.25 then
+		local snap = { t = now, total = total, spells = {} }
+		local name, row
+		for name, row in pairs(bucket) do
+			snap.spells[name] = row.damage or 0
+		end
+		table.insert(hist, snap)
+	end
+	while table.getn(hist) > 0 and (now - hist[1].t) > RATE_WINDOW do
+		table.remove(hist, 1)
+	end
+	local base = hist[1]
+	if not base then
+		return nil
+	end
+	local span = now - base.t
+	if span < 1 then
+		return nil
+	end
+	if span > RATE_WINDOW then
+		span = RATE_WINDOW
+	end
+	local name, row
+	for name, row in pairs(bucket) do
+		local dealt = (row.damage or 0) - (base.spells[name] or 0)
+		if dealt < 0 then
+			dealt = 0
+		end
+		row.dps = dealt / span
+	end
+	local header = total - (base.total or 0)
+	if header < 0 then
+		header = 0
+	end
+	return header / span
+end
+
 local function resetData()
 	if not state then
 		loadState()
 	end
+	clearRecentRate()
 	state.spells = {}
 	state.total = 0
 	state.kills = 0
@@ -1127,6 +1202,7 @@ local function windowReset(dropTest, mode)
 		testMeter = nil
 	end
 	captureBase(mode)
+	clearRecentRate(mode)
 	if showsKills(mode) then
 		state.spells = {}
 		state.kills = 0
@@ -1173,6 +1249,9 @@ local function rebuild(mode)
 	if not state then
 		return 0
 	end
+	if not mode then
+		mode = viewMode()
+	end
 	local lines, total, rdps = pullMeter(mode)
 	local gameTotal = tonumber(total) or 0
 	local bKey, tKey, timeKey = baseFields(mode)
@@ -1182,6 +1261,7 @@ local function rebuild(mode)
 		state[tKey] = nil
 		state[timeKey] = nil
 		baseMap = nil
+		clearRecentRate(mode)
 	end
 	local since = 1
 	if baseMap then
@@ -1245,12 +1325,61 @@ local function rebuild(mode)
 		end
 	end
 	if showsKills(mode) then
+		local iconOwners = {}
+		local function iconKey(path)
+			if not path or path == "" then
+				return nil
+			end
+			path = string.lower(path)
+			path = string.gsub(path, "/", "\\")
+			local _, _, tail = string.find(path, "\\([^\\]+)$")
+			if tail then
+				path = tail
+			end
+			path = string.gsub(path, "%.blp$", "")
+			if path == "" or path == "inv_misc_questionmark" then
+				return nil
+			end
+			return path
+		end
+		local ownerName, ownerRow
+		for ownerName, ownerRow in pairs(bucket) do
+			if ownerRow.fromMeter then
+				local key = iconKey(ownerRow.iconPath)
+				if not key then
+					key = iconKey(iconFor(ownerName))
+				end
+				if key then
+					local list = iconOwners[key]
+					if not list then
+						list = {}
+						iconOwners[key] = list
+					end
+					list[table.getn(list) + 1] = ownerName
+				end
+			end
+		end
 		local spellName, rec
 		for spellName, rec in pairs(state.spells) do
 			if (rec.kills or 0) > 0 then
-				bucketOf(spellName)
+				if bucket[spellName] then
+					bucketOf(spellName)
+				else
+					local key = iconKey(iconFor(spellName))
+					local owners = key and iconOwners[key]
+					if owners and table.getn(owners) == 1 then
+						local row = bucket[owners[1]]
+						row.kills = (row.kills or 0) + (rec.kills or 0)
+					else
+						bucketOf(spellName)
+					end
+				end
 			end
 		end
+	end
+	local windowRate = recentRate(mode, runNow(), meterTotal, bucket)
+	if windowRate then
+		meterDps = windowRate
 	end
 	-- Fold a proc into the spell it actually casts: one Blast Wave row, and
 	-- Pyroclasm lives on the proc button. Collect first; pairs cannot drop keys.
@@ -2419,26 +2548,14 @@ local function showHeaderTip(kind, mode)
 	end
 	if kind == "dps" then
 		local title = "DPS"
-		local body = "The run's damage per second, from the game's own clock."
+		local body = "Damage per second over the last 10 seconds of the run."
 		if mode == "healing" then
 			title = "HPS"
-			body = "Healing per second over the run's clock. Overhealing is left out."
+			body = "Healing per second over the last 10 seconds. Overhealing is left out."
 		elseif mode == "boss" then
-			body = "Damage per second of this boss fight."
+			body = "Damage per second over the last 10 seconds of this boss fight."
 		elseif mode == "taken" then
-			body = "Damage taken per second over the run's clock."
-		end
-		local bKey = baseFields(mode)
-		if state and state[bKey] then
-			if mode == "healing" then
-				body = "Healing per second since the last reset, on the game's clock."
-			elseif mode == "boss" then
-				body = "Boss damage per second since the last reset."
-			elseif mode == "taken" then
-				body = "Damage taken per second since the last reset."
-			else
-				body = "Damage per second since the last reset, on the game's clock."
-			end
+			body = "Damage taken per second over the last 10 seconds."
 		end
 		showTip(this, "LEFT", title, nil, {
 			{ body, 1, 1, 1 },
