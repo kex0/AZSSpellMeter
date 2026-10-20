@@ -78,6 +78,21 @@ local HEADER_TINT = {
 	boss = { 0.40, 0.16, 0.06, 0.90, 0.45, 0.16 },
 	taken = { 0.36, 0.12, 0.10, 0.85, 0.35, 0.28 },
 }
+local LOOK = {
+	scale = 1,
+	cd = true,
+	panel = { 0.05, 0.04, 0.03, 0.82 },
+	border = { 0.78, 0.58, 0.22, 1 },
+	damage = { 0.90, 0.66, 0.22, 1 },
+	healing = { 0.45, 0.78, 0.40, 1 },
+	boss = { 0.90, 0.45, 0.16, 1 },
+	taken = { 0.85, 0.35, 0.28, 1 },
+}
+local settings
+
+local function tone(r, g, b)
+	return r + (1 - r) * 0.45, g + (1 - g) * 0.45, b + (1 - b) * 0.45
+end
 local scanAt = 0
 local lastRaw = ""
 local lastHit = ""
@@ -1443,6 +1458,8 @@ local function refreshWindow(win)
 	end
 
 	local mode = win.fixed or viewMode()
+	local tint = HEADER_TINT[mode] or HEADER_TINT.damage
+	local numR, numG, numB = tone(tint[4], tint[5], tint[6])
 	local amountWord, rateWord, killView = meterWords(win.fixed)
 	local board = meterTotal
 	local dps = meterDps
@@ -1501,10 +1518,14 @@ local function refreshWindow(win)
 		end
 		win.brandText:SetText(title)
 		win.brandText:SetTextColor(1, 0.9, 0.62)
-		local tint = HEADER_TINT[mode]
 		if win.header and tint then
-			win.header:SetBackdropColor(tint[1], tint[2], tint[3], 0.92)
-			win.header:SetBackdropBorderColor(tint[4], tint[5], tint[6], 0.95)
+			local bgA = 0.82
+			local savedBg = config().look
+			if savedBg and type(savedBg.panel) == "table" and savedBg.panel[4] ~= nil then
+				bgA = savedBg.panel[4]
+			end
+			win.header:SetBackdropColor(tint[1], tint[2], tint[3], bgA)
+			win.header:SetBackdropBorderColor(tint[4], tint[5], tint[6], 1)
 		end
 		if win.brand then
 			local coord = CLASS_ICON[classKey]
@@ -1517,15 +1538,7 @@ local function refreshWindow(win)
 			end
 		end
 	end
-	if mode == "healing" then
-		win.totalText:SetTextColor(0.72, 0.95, 0.7)
-	elseif mode == "boss" then
-		win.totalText:SetTextColor(1, 0.72, 0.42)
-	elseif mode == "taken" then
-		win.totalText:SetTextColor(1, 0.55, 0.45)
-	else
-		win.totalText:SetTextColor(1, 0.9, 0.55)
-	end
+	win.totalText:SetTextColor(numR, numG, numB)
 	win.dpsText:SetText(fmtRate(dps) .. " " .. string.lower(rateWord))
 	if win.bubbleText then
 		win.bubbleText:SetText(comma(board))
@@ -1597,7 +1610,7 @@ local function refreshWindow(win)
 				btn:SetBackdropBorderColor(0.4, 0.32, 0.16, 0.7)
 			elseif on then
 				btn.label:SetTextColor(btn.tr, btn.tg, btn.tb)
-				btn:SetBackdropColor(btn.br, btn.bg, btn.bb, 0.92)
+				btn:SetBackdropColor(btn.br, btn.bg, btn.bb, 1)
 				btn:SetBackdropBorderColor(btn.er, btn.eg, btn.eb, 1)
 			else
 				btn.label:SetTextColor(0.62, 0.54, 0.4)
@@ -1656,6 +1669,12 @@ local function refreshWindow(win)
 		end
 	end
 
+	local showCd = true
+	local savedLook = config().look
+	if savedLook and savedLook.cd == false then
+		showCd = false
+	end
+
 	local i
 	for i = 1, K.ROW_POOL do
 		local row = listRows[i]
@@ -1697,43 +1716,17 @@ local function refreshWindow(win)
 				row.name:SetPoint("RIGHT", row.damage, "LEFT", -4, 0)
 			end
 			row.damage:SetText(comma(dealt))
-			if mode == "healing" then
-				row.damage:SetTextColor(0.72, 0.95, 0.7)
-			elseif mode == "boss" then
-				row.damage:SetTextColor(1, 0.78, 0.5)
-			elseif mode == "taken" then
-				row.damage:SetTextColor(1, 0.55, 0.45)
-			else
-				row.damage:SetTextColor(1, 0.9, 0.55)
-			end
+			row.damage:SetTextColor(numR, numG, numB)
 			row.rate:SetText(fmtRate(data.dps or 0))
 			local fill = share
 			if dealt > 0 and fill < 0.015 then
 				fill = 0.015
 			end
 			row.bar:SetWidth(math.max(2, (row:GetWidth() or 1) * fill))
-			if mode == "healing" then
-				if first + i == 1 then
-					row.bar:SetVertexColor(0.22, 0.58, 0.3, 0.9)
-				else
-					row.bar:SetVertexColor(0.1, 0.28, 0.14, 0.75)
-				end
-			elseif mode == "boss" then
-				if first + i == 1 then
-					row.bar:SetVertexColor(0.78, 0.28, 0.1, 0.9)
-				else
-					row.bar:SetVertexColor(0.4, 0.14, 0.06, 0.75)
-				end
-			elseif mode == "taken" then
-				if first + i == 1 then
-					row.bar:SetVertexColor(0.72, 0.22, 0.16, 0.9)
-				else
-					row.bar:SetVertexColor(0.38, 0.12, 0.1, 0.75)
-				end
-			elseif first + i == 1 then
-				row.bar:SetVertexColor(0.82, 0.46, 0.12, 0.85)
+			if first + i == 1 then
+				row.bar:SetVertexColor(tint[4], tint[5], tint[6], 0.9)
 			else
-				row.bar:SetVertexColor(0.42, 0.2, 0.08, 0.75)
+				row.bar:SetVertexColor(tint[1], tint[2], tint[3], 0.75)
 			end
 			local procs = data.procs
 			local textW = 0
@@ -1772,7 +1765,7 @@ local function refreshWindow(win)
 				end
 			end
 			local cd = win.cdMap and win.cdMap[compactKey(data.name)]
-			if row.cd and cd and (tonumber(cd.cdmax) or 0) > 0 then
+			if row.cd and showCd and cd and (tonumber(cd.cdmax) or 0) > 0 then
 				local maxc = tonumber(cd.cdmax) or 1
 				if maxc < 0.1 then
 					maxc = 0.1
@@ -1867,9 +1860,33 @@ local function savePoint()
 	cfg.y = y
 end
 
--- StartMoving does not stop at the screen edge on this client, and the saved
--- position survives a reinstall. Keep the whole frame on the real screen,
--- including flush against the right and bottom edges.
+-- Same visible area SetClampedToScreen uses: UIParent, in screen pixels.
+local function viewBounds()
+	local ps = 1
+	if UIParent and UIParent.GetEffectiveScale then
+		ps = UIParent:GetEffectiveScale() or 1
+	end
+	if not ps or ps <= 0 then
+		ps = 1
+	end
+	local l, r, b, t = 0, 0, 0, 0
+	if UIParent and UIParent.GetLeft and UIParent:GetLeft() then
+		l = UIParent:GetLeft() * ps
+		r = (UIParent:GetRight() or 0) * ps
+		b = (UIParent:GetBottom() or 0) * ps
+		t = (UIParent:GetTop() or 0) * ps
+	end
+	if r - l > 100 and t - b > 100 then
+		return l, r, b, t
+	end
+	local sw = GetScreenWidth and GetScreenWidth() or 0
+	local sh = GetScreenHeight and GetScreenHeight() or 0
+	if sw > 100 and sh > 100 then
+		return 0, sw, 0, sh
+	end
+	return l, r, b, t
+end
+
 local function clampIntoView(target)
 	if not target or not target.GetLeft or not target:IsShown() then
 		return false
@@ -1888,11 +1905,6 @@ local function clampIntoView(target)
 	if not scale or scale <= 0 then
 		scale = 1
 	end
-	local sw = GetScreenWidth and GetScreenWidth() or 0
-	local sh = GetScreenHeight and GetScreenHeight() or 0
-	if sw < 100 or sh < 100 then
-		return false
-	end
 	left = left * scale
 	right = right * scale
 	top = top * scale
@@ -1902,18 +1914,25 @@ local function clampIntoView(target)
 	if width < 8 or height < 8 then
 		return false
 	end
+	local bl, br, bb, bt = viewBounds()
+	if br - bl < 100 or bt - bb < 100 then
+		return false
+	end
 	local nl, nt = left, top
-	if right > sw then
-		nl = sw - width
+	if nl + width > br then
+		nl = br - width
 	end
-	if nl < 0 then
-		nl = 0
+	if nl < bl then
+		nl = bl
 	end
-	if top > sh then
-		nt = sh
+	if nt > bt then
+		nt = bt
 	end
-	if nt - height < 0 then
-		nt = height
+	if nt - height < bb then
+		nt = bb + height
+	end
+	if nt > bt then
+		nt = bt
 	end
 	if math.abs(nl - left) < 0.5 and math.abs(nt - top) < 0.5 then
 		return false
@@ -1932,8 +1951,189 @@ local function clampIntoView(target)
 		parentBottom = (UIParent:GetBottom() or 0) * pscale
 	end
 	target:ClearAllPoints()
-	target:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", (nl - parentLeft) / pscale, (nt - parentBottom) / pscale)
+	target:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", (nl - parentLeft) / scale, (nt - parentBottom) / scale)
 	return true
+end
+
+local function parentMetrics()
+	local pscale = 1
+	if UIParent and UIParent.GetEffectiveScale then
+		pscale = UIParent:GetEffectiveScale() or 1
+	end
+	if not pscale or pscale <= 0 then
+		pscale = 1
+	end
+	local parentLeft = 0
+	local parentBottom = 0
+	local parentTop = 0
+	if UIParent and UIParent.GetLeft then
+		parentLeft = (UIParent:GetLeft() or 0) * pscale
+		parentBottom = (UIParent:GetBottom() or 0) * pscale
+		parentTop = (UIParent:GetTop() or 0) * pscale
+	end
+	return pscale, parentLeft, parentBottom, parentTop
+end
+
+local function screenRect(win)
+	if not win or not win.GetLeft then
+		return nil
+	end
+	local left = win:GetLeft()
+	local right = win:GetRight()
+	local top = win:GetTop()
+	local bottom = win:GetBottom()
+	if not left or not right or not top or not bottom then
+		return nil
+	end
+	local scale = 1
+	if win.GetEffectiveScale then
+		scale = win:GetEffectiveScale() or 1
+	end
+	if not scale or scale <= 0 then
+		scale = 1
+	end
+	return left * scale, right * scale, top * scale, bottom * scale
+end
+
+local function toParent(screenX, screenY, win)
+	local pscale, parentLeft, parentBottom = parentMetrics()
+	local es = pscale
+	if win and win.GetEffectiveScale then
+		es = win:GetEffectiveScale() or pscale
+	end
+	if not es or es <= 0 then
+		es = pscale
+	end
+	return (screenX - parentLeft) / es, (screenY - parentBottom) / es
+end
+
+local function fitRect(left, top, width, height)
+	local bl, br, bb, bt = viewBounds()
+	if br - bl < 100 or bt - bb < 100 then
+		return left, top
+	end
+	if width < 1 then
+		width = 1
+	end
+	if height < 1 then
+		height = 1
+	end
+	if left + width > br then
+		left = br - width
+	end
+	if left < bl then
+		left = bl
+	end
+	if top > bt then
+		top = bt
+	end
+	if top - height < bb then
+		top = bb + height
+	end
+	if top > bt then
+		top = bt
+	end
+	return left, top
+end
+
+local function placeAtPixels(win, left, top)
+	if not win then
+		return
+	end
+	local scale = 1
+	if win.GetEffectiveScale then
+		scale = win:GetEffectiveScale() or 1
+	end
+	if not scale or scale <= 0 then
+		scale = 1
+	end
+	local width = (win:GetWidth() or 1) * scale
+	local height = (win:GetHeight() or 1) * scale
+	left, top = fitRect(left, top, width, height)
+	local x, y = toParent(left, top, win)
+	win:ClearAllPoints()
+	win:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+end
+
+local function parkBeside(win, anchor)
+	local scale = 1
+	if win and win.GetEffectiveScale then
+		scale = win:GetEffectiveScale() or 1
+	end
+	if not scale or scale <= 0 then
+		scale = 1
+	end
+	local width = ((win and win:GetWidth()) or 1) * scale
+	local bl, br, bb, bt = viewBounds()
+	local left = bl + 16
+	local top = bt - 40
+	local al, ar, at = screenRect(anchor)
+	if al and br - bl > 100 then
+		local gap = 8
+		if ar + gap + width <= br then
+			left = ar + gap
+			top = at
+		elseif al - gap - width >= bl then
+			left = al - gap - width
+			top = at
+		else
+			left = bl
+			top = at
+		end
+	end
+	placeAtPixels(win, left, top)
+end
+
+local function anchorTopLeft(win)
+	local left, _, top = screenRect(win)
+	if not left then
+		return false
+	end
+	local x, y = toParent(left, top)
+	win:ClearAllPoints()
+	win:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+	return true
+end
+
+local function beginDrag(win)
+	if not win then
+		return
+	end
+	local cx, cy = GetCursorPosition()
+	if not cx or not cy then
+		return
+	end
+	local left, _, top = screenRect(win)
+	if not left then
+		return
+	end
+	win.dragOn = true
+	win.dragMoved = false
+	win.dragDX = cx - left
+	win.dragDY = cy - top
+	win.dragX0 = cx
+	win.dragY0 = cy
+end
+
+local function stepDrag(win)
+	if not win or not win.dragOn then
+		return false
+	end
+	if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
+		win.dragOn = nil
+		return true
+	end
+	local cx, cy = GetCursorPosition()
+	if not cx or not cy then
+		return false
+	end
+	local dx = cx - (win.dragX0 or cx)
+	local dy = cy - (win.dragY0 or cy)
+	if dx * dx + dy * dy > 16 then
+		win.dragMoved = true
+	end
+	placeAtPixels(win, cx - (win.dragDX or 0), cy - (win.dragDY or 0))
+	return false
 end
 
 local function noteClamped()
@@ -1960,12 +2160,13 @@ end
 -- Keep the top-left corner where it is. StartSizing scales around the anchor,
 -- which sits outside the window whenever that anchor is not the corner being dragged.
 local function pinTopLeft()
-	local left, top = frame:GetLeft(), frame:GetTop()
-	if not left or not top then
+	local left, _, top = screenRect(frame)
+	if not left then
 		return
 	end
+	local x, y = toParent(left, top, frame)
 	frame:ClearAllPoints()
-	frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+	frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
 end
 
 local function applyShown()
@@ -2063,9 +2264,9 @@ local function roundBackdrop(edge)
 		inset = 2
 	end
 	return {
-		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+		bgFile = K.SOLID,
 		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-		tile = true,
+		tile = false,
 		tileSize = 16,
 		edgeSize = e,
 		insets = { left = inset, right = inset, top = inset, bottom = inset },
@@ -2108,38 +2309,20 @@ local function placeTip()
 	end
 	local tipW = (tip:GetWidth() or 96) * tipScale
 	local tipH = (tip:GetHeight() or 40) * tipScale
-	local sw = GetScreenWidth and GetScreenWidth() or 0
-	local sh = GetScreenHeight and GetScreenHeight() or 0
-	local left = x - tipW / 2
-	if left < 2 then
-		left = 2
+	local _, br, _, bt = viewBounds()
+	local gap = 4
+	local left = x + gap
+	local top = y + gap + tipH
+	if bt > 100 and top > bt then
+		top = y - gap
 	end
-	if sw > 0 and left + tipW > sw - 2 then
-		left = sw - 2 - tipW
+	if br > 100 and left + tipW > br then
+		left = x - gap - tipW
 	end
-	local cx = left + tipW / 2
-	local gap = 14 * tipScale
-	local parentScale = scale
-	local parentLeft = 0
-	local parentBottom = 0
-	if UIParent and UIParent.GetEffectiveScale then
-		parentScale = UIParent:GetEffectiveScale() or scale
-	end
-	if not parentScale or parentScale <= 0 then
-		parentScale = 1
-	end
-	if UIParent and UIParent.GetLeft then
-		parentLeft = (UIParent:GetLeft() or 0) * parentScale
-		parentBottom = (UIParent:GetBottom() or 0) * parentScale
-	end
-	local px = (cx - parentLeft) / parentScale
-	local py = (y - parentBottom) / parentScale
+	left, top = fitRect(left, top, tipW, tipH)
+	local px, py = toParent(left, top, tip)
 	tip:ClearAllPoints()
-	if sh > 0 and y + gap + tipH > sh - 2 then
-		tip:SetPoint("TOP", UIParent, "BOTTOMLEFT", px, py - (22 * tipScale) / parentScale)
-	else
-		tip:SetPoint("BOTTOM", UIParent, "BOTTOMLEFT", px, py + gap / parentScale)
-	end
+	tip:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", px, py)
 end
 
 local function paintTip(title, icon, lines)
@@ -2213,6 +2396,141 @@ local function showTip(owner, side, title, icon, lines)
 	tipOwner = owner
 	tipFill = nil
 	paintTip(title, icon, lines)
+end
+
+local function showHeaderTip(kind, mode)
+	if not mode then
+		mode = viewMode()
+	end
+	if kind == "reset" then
+		local line = "Starts the damage view over, including kills."
+		if mode == "healing" then
+			line = "Starts the healing view over. Damage and kills are kept."
+		elseif mode == "boss" then
+			line = "Starts the boss view over. Damage and kills are kept."
+		elseif mode == "taken" then
+			line = "Starts the taken view over. Damage dealt and kills are kept."
+		end
+		showTip(this, "RIGHT", "Reset", nil, {
+			{ line, 1, 1, 1 },
+			{ "The built-in meter keeps its own numbers.", 0.75, 0.75, 0.75 },
+		})
+		return
+	end
+	if kind == "dps" then
+		local title = "DPS"
+		local body = "The run's damage per second, from the game's own clock."
+		if mode == "healing" then
+			title = "HPS"
+			body = "Healing per second over the run's clock. Overhealing is left out."
+		elseif mode == "boss" then
+			body = "Damage per second of this boss fight."
+		elseif mode == "taken" then
+			body = "Damage taken per second over the run's clock."
+		end
+		local bKey = baseFields(mode)
+		if state and state[bKey] then
+			if mode == "healing" then
+				body = "Healing per second since the last reset, on the game's clock."
+			elseif mode == "boss" then
+				body = "Boss damage per second since the last reset."
+			elseif mode == "taken" then
+				body = "Damage taken per second since the last reset."
+			else
+				body = "Damage per second since the last reset, on the game's clock."
+			end
+		end
+		showTip(this, "LEFT", title, nil, {
+			{ body, 1, 1, 1 },
+			{ "It pauses whenever the run pauses.", 0.75, 0.75, 0.75 },
+		})
+		return
+	end
+	local title = "Damage"
+	local tip = "Damage dealt this run, as the game counted it."
+	if mode == "healing" then
+		title = "Healing"
+		tip = "Healing this run, as the game counted it. Overhealing is left out."
+	elseif mode == "boss" then
+		title = "Boss"
+		tip = "Damage dealt in the last boss fight. It stays until the next boss."
+	elseif mode == "taken" then
+		title = "Taken"
+		tip = "Damage you took this run, split by what hit you."
+	end
+	local bKey = baseFields(mode)
+	if state and state[bKey] then
+		tip = "Since the last reset on this view, still counted by the game."
+	end
+	local lines = {
+		{ tip, 1, 1, 1 },
+	}
+	local stats = AZS_STATS
+	if stats then
+		local function push(text)
+			if text and table.getn(lines) < 8 then
+				local n = table.getn(lines) + 1
+				lines[n] = { text, 0.82, 0.78, 0.62 }
+			end
+		end
+		local function mult(v)
+			v = tonumber(v)
+			if not v or v == 0 then
+				return nil
+			end
+			return string.format("x%.2f", v)
+		end
+		local function pct(v)
+			v = tonumber(v)
+			if not v or v == 0 then
+				return nil
+			end
+			if v > 0 and v <= 1.5 then
+				return string.format("%.0f%%", v * 100)
+			end
+			return string.format("%.0f%%", v)
+		end
+		local function num(v)
+			v = tonumber(v)
+			if not v or v == 0 then
+				return nil
+			end
+			if v == math.floor(v) then
+				return string.format("%d", v)
+			end
+			return string.format("%.2f", v)
+		end
+		local text
+		text = mult(stats.dmg)
+		if text then
+			push("Damage " .. text)
+		end
+		text = pct(stats.crit)
+		if text then
+			push("Crit " .. text)
+		end
+		text = mult(stats.cm)
+		if text then
+			push("Crit damage " .. text)
+		end
+		text = mult(stats.cd)
+		if text then
+			push("Cooldown " .. text)
+		end
+		text = num(stats.cnt)
+		if text then
+			push("Extra targets " .. text)
+		end
+		text = num(stats.area)
+		if text then
+			push("Area " .. text)
+		end
+		text = num(stats.echo)
+		if text then
+			push("Echo " .. text)
+		end
+	end
+	showTip(this, "LEFT", title, nil, lines)
 end
 
 local function trackTip(owner, fill)
@@ -2468,18 +2786,175 @@ local function placePop(win)
 	end
 	win:SetWidth(width)
 	win:SetHeight(height)
+	local s = 1
+	local savedScale = config().look
+	if savedScale and savedScale.scale ~= nil then
+		s = tonumber(savedScale.scale) or 1
+	end
+	if s < 0.7 then
+		s = 0.7
+	elseif s > 1.5 then
+		s = 1.5
+	end
+	if win.SetScale then
+		win:SetScale(s)
+		win.paintedScale = s
+	end
 	win:ClearAllPoints()
-	if box.x and box.y then
-		win:SetPoint(box.point or "TOPLEFT", UIParent, box.rel or "BOTTOMLEFT", box.x, box.y)
+	if box.x ~= nil and box.y ~= nil then
+		local pscale, parentLeft, parentBottom, parentTop = parentMetrics()
+		local es = pscale
+		if win.GetEffectiveScale then
+			es = win:GetEffectiveScale() or pscale
+		end
+		local left, top
+		if box.rel == "TOPLEFT" then
+			left = parentLeft + box.x * es
+			top = parentTop + box.y * es
+		else
+			left = parentLeft + box.x * es
+			top = parentBottom + box.y * es
+		end
+		placeAtPixels(win, left, top)
 		return
 	end
-	local left = 40
-	local top = 400
-	if frame and frame.GetRight then
-		left = (frame:GetRight() or left) + 12
-		top = frame:GetTop() or top
+	parkBeside(win, frame)
+end
+
+local function lookValue(key)
+	local saved = config().look
+	if saved and saved[key] ~= nil then
+		return saved[key]
 	end
-	win:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+	return LOOK[key]
+end
+
+local function lookColor(key)
+	local base = LOOK[key]
+	local got = lookValue(key)
+	if type(got) ~= "table" then
+		got = base
+	end
+	return got[1] or base[1], got[2] or base[2], got[3] or base[3], got[4] or base[4] or 1
+end
+
+local function ensureLook()
+	local cfg = config()
+	if not cfg.look then
+		cfg.look = {}
+	end
+	return cfg.look
+end
+
+local function lookScale()
+	local s = tonumber(lookValue("scale")) or 1
+	if s < 0.7 then
+		s = 0.7
+	elseif s > 1.5 then
+		s = 1.5
+	end
+	return s
+end
+
+local function paintBorder(btn, br, bg, bb)
+	if btn and btn.SetBackdropBorderColor then
+		btn:SetBackdropBorderColor(br, bg, bb, 1)
+	end
+end
+
+local function applyLook(buttons)
+	local pr, pg, pb, pa = lookColor("panel")
+	local brdR, brdG, brdB = lookColor("border")
+	local s = lookScale()
+	local function paintWin(win, alpha)
+		if not win then
+			return
+		end
+		win:SetBackdropColor(pr, pg, pb, alpha)
+		win:SetBackdropBorderColor(brdR, brdG, brdB, 1)
+		if win.SetAlpha then
+			local fade = tonumber(lookValue("alpha"))
+			if not fade then
+				fade = 1
+			end
+			if fade < 0 then
+				fade = 0
+			elseif fade > 1 then
+				fade = 1
+			end
+			win:SetAlpha(fade)
+		end
+		if win.SetScale and win.paintedScale ~= s then
+			local sl, _, st = screenRect(win)
+			win:SetScale(s)
+			win.paintedScale = s
+			if sl then
+				local x, y = toParent(sl, st, win)
+				win:ClearAllPoints()
+				win:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+				if win == frame then
+					savePoint()
+				elseif win.fixed then
+					savePop(win)
+				end
+			end
+		end
+	end
+	paintWin(frame, pa)
+	paintWin(bubble, pa)
+	local mode, pop
+	for mode, pop in pairs(popped) do
+		paintWin(pop, pa)
+		if buttons then
+			paintBorder(pop.closeBtn, brdR, brdG, brdB)
+			paintBorder(pop.resetBtn, brdR, brdG, brdB)
+		end
+	end
+	if frame and frame.tip then
+		frame.tip:SetBackdropColor(pr, pg, pb, 1)
+		frame.tip:SetBackdropBorderColor(brdR, brdG, brdB, 1)
+	end
+	if settings then
+		settings:SetBackdropColor(pr * 0.55, pg * 0.55, pb * 0.55, 1)
+		settings:SetBackdropBorderColor(brdR, brdG, brdB, 1)
+		if settings.SetAlpha then
+			settings:SetAlpha(1)
+		end
+		if settings.header then
+			settings.header:SetBackdropColor(brdR * 0.46, brdG * 0.46, brdB * 0.46, 1)
+			settings.header:SetBackdropBorderColor(brdR, brdG, brdB, 1)
+		end
+		if buttons then
+			paintBorder(settings.closeBtn, brdR, brdG, brdB)
+			paintBorder(settings.resetBtn, brdR, brdG, brdB)
+		end
+	end
+	local keys = { "damage", "healing", "boss", "taken" }
+	local ki
+	for ki = 1, 4 do
+		local key = keys[ki]
+		local r, g, b = lookColor(key)
+		local tint = HEADER_TINT[key]
+		tint[1], tint[2], tint[3] = r * 0.46, g * 0.46, b * 0.46
+		tint[4], tint[5], tint[6] = r, g, b
+	end
+	if frame and frame.modeBtns then
+		for ki = 1, table.getn(frame.modeBtns) do
+			local btn = frame.modeBtns[ki]
+			local tint = HEADER_TINT[btn.mode]
+			if tint then
+				btn.br, btn.bg, btn.bb = tint[1], tint[2], tint[3]
+				btn.er, btn.eg, btn.eb = tint[4], tint[5], tint[6]
+				btn.tr, btn.tg, btn.tb = tone(tint[4], tint[5], tint[6])
+			end
+		end
+	end
+	if buttons and frame then
+		paintBorder(frame.minBtn, brdR, brdG, brdB)
+		paintBorder(frame.resetBtn, brdR, brdG, brdB)
+		paintBorder(frame.setBtn, brdR, brdG, brdB)
+		paintBorder(bubble, brdR, brdG, brdB)
+	end
 end
 
 createDetached = function(mode)
@@ -2504,7 +2979,7 @@ createDetached = function(mode)
 		win:SetMaxResize(760, maxH)
 	end
 	if win.SetClampedToScreen then
-		win:SetClampedToScreen(false)
+		win:SetClampedToScreen(true)
 	end
 	win:SetBackdrop(roundBackdrop(12))
 	win:SetBackdropColor(0.05, 0.04, 0.03, 0.82)
@@ -2519,21 +2994,21 @@ createDetached = function(mode)
 	header:SetBackdropColor(0.34, 0.2, 0.06, 0.88)
 	header:SetBackdropBorderColor(0.72, 0.5, 0.16, 0.7)
 	win.header = header
-	header:RegisterForDrag("LeftButton")
-	header:SetScript("OnDragStart", function()
-		if not config().locked then
-			win.dragging = true
-			win:StartMoving()
+	local function startWinDrag()
+		if config().locked then
+			return
 		end
-	end)
-	header:SetScript("OnDragStop", function()
+		win.dragging = true
+		win:StartMoving()
+	end
+	local function stopWinDrag()
 		win.dragging = false
 		win:StopMovingOrSizing()
-		if clampIntoView(win, 120, 20) then
-			noteClamped()
-		end
 		savePop(win)
-	end)
+	end
+	header:RegisterForDrag("LeftButton")
+	header:SetScript("OnDragStart", startWinDrag)
+	header:SetScript("OnDragStop", stopWinDrag)
 
 	local brandBack = header:CreateTexture(nil, "ARTWORK")
 	brandBack:SetTexture(K.SOLID)
@@ -2574,9 +3049,10 @@ createDetached = function(mode)
 		})
 	end)
 	closeBtn:SetScript("OnLeave", function()
-		closeBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		applyLook(true)
 		leaveTip()
 	end)
+	win.closeBtn = closeBtn
 
 	local resetBtn = CreateFrame("Button", nil, header)
 	resetBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
@@ -2605,10 +3081,13 @@ createDetached = function(mode)
 	end)
 	resetBtn:SetScript("OnEnter", function()
 		resetBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		showHeaderTip("reset", mode)
 	end)
 	resetBtn:SetScript("OnLeave", function()
-		resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		applyLook(true)
+		leaveTip()
 	end)
+	win.resetBtn = resetBtn
 
 	local dpsBtn = CreateFrame("Button", nil, header)
 	dpsBtn:SetPoint("RIGHT", resetBtn, "LEFT", -8, 0)
@@ -2622,6 +3101,15 @@ createDetached = function(mode)
 	dpsText:SetTextColor(0.78, 0.95, 0.72)
 	win.dpsText = dpsText
 	win.dpsBtn = dpsBtn
+	dpsBtn:RegisterForDrag("LeftButton")
+	dpsBtn:SetScript("OnDragStart", startWinDrag)
+	dpsBtn:SetScript("OnDragStop", stopWinDrag)
+	dpsBtn:SetScript("OnEnter", function()
+		showHeaderTip("dps", mode)
+	end)
+	dpsBtn:SetScript("OnLeave", function()
+		leaveTip()
+	end)
 
 	local totalBtn = CreateFrame("Button", nil, header)
 	totalBtn:SetPoint("RIGHT", dpsBtn, "LEFT", -10, 0)
@@ -2635,6 +3123,15 @@ createDetached = function(mode)
 	totalText:SetTextColor(1, 0.9, 0.55)
 	win.totalText = totalText
 	win.totalBtn = totalBtn
+	totalBtn:RegisterForDrag("LeftButton")
+	totalBtn:SetScript("OnDragStart", startWinDrag)
+	totalBtn:SetScript("OnDragStop", stopWinDrag)
+	totalBtn:SetScript("OnEnter", function()
+		showHeaderTip("total", mode)
+	end)
+	totalBtn:SetScript("OnLeave", function()
+		leaveTip()
+	end)
 	brandText:SetPoint("RIGHT", totalBtn, "LEFT", -8, 0)
 
 	local cols = CreateFrame("Frame", nil, win)
@@ -2772,7 +3269,10 @@ createDetached = function(mode)
 		if config().locked then
 			return
 		end
-		local scale = uiScale()
+		local scale = 1
+		if win.GetEffectiveScale then
+			scale = win:GetEffectiveScale() or 1
+		end
 		local cx, cy = GetCursorPosition()
 		win.sizeX = cx / scale
 		win.sizeY = cy / scale
@@ -2792,13 +3292,22 @@ createDetached = function(mode)
 		refresh()
 	end)
 	win:SetScript("OnUpdate", function()
+		if win.needNudge and win:GetLeft() then
+			win.needNudge = nil
+			if clampIntoView(win) then
+				savePop(win)
+			end
+		end
 		if win.sizing then
 			if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
 				win.sizing = false
 				savePop(win)
 				refresh()
 			else
-				local scale = uiScale()
+				local scale = 1
+				if win.GetEffectiveScale then
+					scale = win:GetEffectiveScale() or 1
+				end
 				local cx, cy = GetCursorPosition()
 				cx = cx / scale
 				cy = cy / scale
@@ -2858,7 +3367,13 @@ detach = function(mode)
 	end
 	popped[mode] = win
 	win:Show()
-	savePop(win)
+	applyLook(true)
+	win.needNudge = true
+	if clampIntoView(win) then
+		savePop(win)
+	else
+		savePop(win)
+	end
 	refresh()
 end
 
@@ -2900,9 +3415,6 @@ local function finishMainSize()
 		return
 	end
 	sizing = false
-	if frame.SetClampedToScreen then
-		frame:SetClampedToScreen(false)
-	end
 	if clampIntoView(frame) then
 		noteClamped()
 	end
@@ -2917,16 +3429,16 @@ local function onMainGripDown()
 	if config().locked then
 		return
 	end
-	local scale = uiScale()
+	local scale = 1
+	if frame.GetEffectiveScale then
+		scale = frame:GetEffectiveScale() or 1
+	end
 	local cx, cy = GetCursorPosition()
 	sizeX = cx / scale
 	sizeY = cy / scale
 	sizeW = frame:GetWidth()
 	sizeH = frame:GetHeight()
 	sizing = true
-	if frame.SetClampedToScreen then
-		frame:SetClampedToScreen(false)
-	end
 	pinTopLeft()
 end
 
@@ -2940,7 +3452,10 @@ local function onMainUpdate()
 		if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
 			finishMainSize()
 		else
-			local scale = uiScale()
+			local scale = 1
+			if frame.GetEffectiveScale then
+				scale = frame:GetEffectiveScale() or 1
+			end
 			local cx, cy = GetCursorPosition()
 			cx = cx / scale
 			cy = cy / scale
@@ -3039,6 +3554,536 @@ local function onBubbleUpdate()
 	end
 end
 
+local function buildSettings()
+	local box = CreateFrame("Frame", "AZSSpellMeterSettings", UIParent)
+	settings = box
+	box:SetWidth(248)
+	box:SetHeight(370)
+	box:SetFrameStrata("DIALOG")
+	box:SetMovable(true)
+	box:EnableMouse(true)
+	box:EnableMouseWheel(true)
+	box:SetScript("OnMouseWheel", function() end)
+	if box.SetClampedToScreen then
+		box:SetClampedToScreen(true)
+	end
+	box:SetBackdrop(roundBackdrop(12))
+	box:SetBackdropColor(0.04, 0.03, 0.02, 0.96)
+	box:SetBackdropBorderColor(0.78, 0.58, 0.22, 1)
+	box.pick = "panel"
+	box.pickName = "Window"
+	if UISpecialFrames then
+		table.insert(UISpecialFrames, "AZSSpellMeterSettings")
+	end
+
+	local header = CreateFrame("Button", nil, box)
+	header:SetPoint("TOPLEFT", box, "TOPLEFT", 8, -6)
+	header:SetPoint("TOPRIGHT", box, "TOPRIGHT", -8, -6)
+	header:SetHeight(16)
+	header:SetBackdrop(panelBackdrop())
+	header:SetBackdropColor(0.34, 0.2, 0.06, 0.88)
+	header:SetBackdropBorderColor(0.72, 0.5, 0.16, 0.7)
+	box.header = header
+	header:RegisterForDrag("LeftButton")
+	header:SetScript("OnDragStart", function()
+		box.dragging = true
+		box:StartMoving()
+	end)
+	header:SetScript("OnDragStop", function()
+		box.dragging = false
+		box:StopMovingOrSizing()
+		local point, _, rel, x, y = box:GetPoint(1)
+		if point then
+			local saved = ensureLook()
+			saved.spoint = point
+			saved.srel = rel
+			saved.sx = x
+			saved.sy = y
+		end
+	end)
+	box:SetScript("OnUpdate", function()
+		if not this.needNudge or not this:IsShown() or not this:GetLeft() then
+			return
+		end
+		this.needNudge = nil
+		if clampIntoView(this) then
+			local point, _, rel, x, y = this:GetPoint(1)
+			if point then
+				local saved = ensureLook()
+				saved.spoint = point
+				saved.srel = rel
+				saved.sx = x
+				saved.sy = y
+			end
+		end
+	end)
+	local title = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	title:SetPoint("LEFT", header, "LEFT", 6, 0)
+	title:SetText("Settings")
+	face(title, 10)
+	title:SetTextColor(1, 0.9, 0.62)
+	local closeBtn = CreateFrame("Button", nil, header)
+	closeBtn:SetPoint("RIGHT", header, "RIGHT", -3, 0)
+	closeBtn:SetWidth(14)
+	closeBtn:SetHeight(14)
+	closeBtn:SetBackdrop(roundBackdrop(8))
+	closeBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+	closeBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+	paintX(closeBtn)
+	box.closeBtn = closeBtn
+	closeBtn:SetScript("OnClick", function()
+		box:Hide()
+	end)
+	closeBtn:SetScript("OnEnter", function()
+		closeBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		showTip(this, "RIGHT", "Close", nil, {
+			{ "Hide settings. The meter stays as it is.", 1, 1, 1 },
+		})
+	end)
+	closeBtn:SetScript("OnLeave", function()
+		applyLook(true)
+		leaveTip()
+	end)
+
+	local function snap(v, step, lo, hi)
+		local n = math.floor((v or lo) / step + 0.5) * step
+		if n < lo then
+			n = lo
+		elseif n > hi then
+			n = hi
+		end
+		return n
+	end
+
+	local function makeSlider(y, label, minV, maxV, step)
+		local name = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		name:SetPoint("TOPLEFT", box, "TOPLEFT", 12, y)
+		name:SetText(label)
+		face(name, 10)
+		name:SetTextColor(0.85, 0.78, 0.62)
+		local value = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		value:SetPoint("TOPRIGHT", box, "TOPRIGHT", -12, y)
+		value:SetJustifyH("RIGHT")
+		face(value, 10)
+		value:SetTextColor(1, 0.9, 0.62)
+		local slider = CreateFrame("Slider", nil, box)
+		slider:SetPoint("TOPLEFT", box, "TOPLEFT", 12, y - 14)
+		slider:SetPoint("TOPRIGHT", box, "TOPRIGHT", -12, y - 14)
+		slider:SetHeight(12)
+		slider:SetOrientation("HORIZONTAL")
+		slider:SetMinMaxValues(minV, maxV)
+		slider:SetValueStep(step)
+		slider.step = step
+		slider.lo = minV
+		slider.hi = maxV
+		slider:SetBackdrop(panelBackdrop())
+		slider:SetBackdropColor(0.08, 0.06, 0.04, 0.9)
+		slider:SetBackdropBorderColor(0.4, 0.3, 0.12, 1)
+		slider:SetThumbTexture(K.SOLID)
+		if slider.GetThumbTexture then
+			local thumb = slider:GetThumbTexture()
+			if thumb then
+				thumb:SetWidth(8)
+				thumb:SetHeight(12)
+				thumb:SetVertexColor(1, 0.86, 0.5, 1)
+			end
+		end
+		slider:EnableMouseWheel(true)
+		slider:SetScript("OnMouseWheel", function()
+			local v = this:GetValue() or this.lo or 0
+			local delta = this.step or 1
+			if arg1 and arg1 < 0 then
+				v = v - delta
+			else
+				v = v + delta
+			end
+			this:SetValue(v)
+		end)
+		slider:SetValue(minV)
+		return slider, value, name
+	end
+
+	local function fitWindows()
+		if frame and frame:IsShown() and clampIntoView(frame) then
+			savePoint()
+		end
+		if bubble and bubble:IsShown() and clampIntoView(bubble) then
+		end
+		local mode, pop
+		for mode, pop in pairs(popped) do
+			if pop:IsShown() and clampIntoView(pop) then
+				savePop(pop)
+			end
+		end
+	end
+
+	local scaleSlider, scaleValue = makeSlider(-30, "Scale", 70, 150, 5)
+	box.scaleSlider = scaleSlider
+	box.scaleValue = scaleValue
+	local fadeSlider, fadeValue = makeSlider(-66, "Opacity", 0, 100, 1)
+	box.fadeSlider = fadeSlider
+	box.fadeValue = fadeValue
+	local opSlider, opValue = makeSlider(-102, "Background", 0, 100, 1)
+	box.opSlider = opSlider
+	box.opValue = opValue
+
+	local function makeCheck(y, text)
+		local hit = CreateFrame("Button", nil, box)
+		hit:SetPoint("TOPLEFT", box, "TOPLEFT", 12, y)
+		hit:SetWidth(220)
+		hit:SetHeight(16)
+		local square = CreateFrame("Frame", nil, hit)
+		square:SetPoint("LEFT", hit, "LEFT", 0, 0)
+		square:SetWidth(14)
+		square:SetHeight(14)
+		square:SetBackdrop(roundBackdrop(8))
+		square:SetBackdropColor(0.08, 0.06, 0.04, 0.9)
+		square:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		local mark = square:CreateTexture(nil, "OVERLAY")
+		mark:SetTexture(K.SOLID)
+		mark:SetVertexColor(1, 0.86, 0.5, 1)
+		mark:SetWidth(8)
+		mark:SetHeight(8)
+		mark:SetPoint("CENTER", square, "CENTER", 0, 0)
+		mark:Hide()
+		local label = hit:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		label:SetPoint("LEFT", square, "RIGHT", 6, 0)
+		label:SetText(text)
+		face(label, 10)
+		label:SetTextColor(0.9, 0.84, 0.68)
+		hit.mark = mark
+		return hit
+	end
+
+	local cdHit = makeCheck(-138, "Cooldown bars")
+	box.cdMark = cdHit.mark
+	local lockHit = makeCheck(-156, "Lock windows")
+	box.lockMark = lockHit.mark
+
+	local colors = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	colors:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -180)
+	colors:SetText("Colors")
+	face(colors, 10)
+	colors:SetTextColor(1, 0.9, 0.62)
+
+	local picks = {
+		{ key = "panel", name = "Window", tip = "Background of the meter windows." },
+		{ key = "border", name = "Border", tip = "Edge of the meter windows and their buttons." },
+		{ key = "damage", name = "Damage", tip = "Damage title, bars, and numbers." },
+		{ key = "healing", name = "Healing", tip = "Healing title, bars, and numbers." },
+		{ key = "boss", name = "Boss", tip = "Boss title, bars, and numbers." },
+		{ key = "taken", name = "Taken", tip = "Taken title, bars, and numbers." },
+	}
+	box.swatches = {}
+	local sw, gap, n = 22, 8, table.getn(picks)
+	local rowW = n * sw + (n - 1) * gap
+	local startX = math.floor((248 - rowW) / 2)
+	local si
+	for si = 1, n do
+		local spec = picks[si]
+		local b = CreateFrame("Button", nil, box)
+		b:SetWidth(sw)
+		b:SetHeight(sw)
+		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -196)
+		b:SetBackdrop(roundBackdrop(8))
+		b.key = spec.key
+		b.pickName = spec.name
+		b.tip = spec.tip
+		b:SetScript("OnClick", function()
+			box.pick = this.key
+			box.pickName = this.pickName
+			box.sync()
+		end)
+		b:SetScript("OnEnter", function()
+			showTip(this, "RIGHT", this.pickName, nil, {
+				{ this.tip, 1, 1, 1 },
+			})
+		end)
+		b:SetScript("OnLeave", function()
+			leaveTip()
+		end)
+		box.swatches[si] = b
+	end
+
+	local caption = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -224)
+	caption:SetText("Window")
+	face(caption, 10)
+	caption:SetTextColor(1, 0.9, 0.62)
+	box.caption = caption
+
+	local redSlider, redValue, redName = makeSlider(-242, "Red", 0, 255, 1)
+	local greenSlider, greenValue, greenName = makeSlider(-274, "Green", 0, 255, 1)
+	local blueSlider, blueValue, blueName = makeSlider(-306, "Blue", 0, 255, 1)
+	redName:SetTextColor(1, 0.55, 0.45)
+	greenName:SetTextColor(0.55, 0.9, 0.55)
+	blueName:SetTextColor(0.55, 0.75, 1)
+	box.red = redSlider
+	box.green = greenSlider
+	box.blue = blueSlider
+	box.redValue = redValue
+	box.greenValue = greenValue
+	box.blueValue = blueValue
+
+	local resetBtn = CreateFrame("Button", nil, box)
+	resetBtn:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 12, 10)
+	resetBtn:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -12, 10)
+	resetBtn:SetHeight(18)
+	resetBtn:SetBackdrop(roundBackdrop(8))
+	resetBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+	resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+	local resetText = resetBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0)
+	resetText:SetText("Reset settings")
+	face(resetText, 10)
+	resetText:SetTextColor(1, 0.86, 0.5)
+	box.resetBtn = resetBtn
+
+	local function syncSettings()
+		box.quiet = true
+		local pct = snap((tonumber(lookValue("scale")) or 1) * 100, 5, 70, 150)
+		scaleSlider:SetValue(pct)
+		scaleValue:SetText(pct .. "%")
+		local fade = tonumber(lookValue("alpha"))
+		if not fade then
+			fade = 1
+		end
+		fade = snap(fade * 100, 1, 0, 100)
+		fadeSlider:SetValue(fade)
+		fadeValue:SetText(fade .. "%")
+		local _, _, _, pa = lookColor("panel")
+		local op = snap(pa * 100, 1, 0, 100)
+		opSlider:SetValue(op)
+		opValue:SetText(op .. "%")
+		if lookValue("cd") == false then
+			cdHit.mark:Hide()
+		else
+			cdHit.mark:Show()
+		end
+		if config().locked then
+			lockHit.mark:Show()
+		else
+			lockHit.mark:Hide()
+		end
+		local pick = box.pick or "panel"
+		local i
+		for i = 1, table.getn(box.swatches) do
+			local swatch = box.swatches[i]
+			local r, g, b = lookColor(swatch.key)
+			swatch:SetBackdropColor(r, g, b, 1)
+			if swatch.key == pick then
+				swatch:SetBackdropBorderColor(1, 0.95, 0.75, 1)
+			else
+				local br, bg, bb = lookColor("border")
+				swatch:SetBackdropBorderColor(br, bg, bb, 1)
+			end
+		end
+		local r, g, b = lookColor(pick)
+		redSlider:SetValue(snap(r * 255, 1, 0, 255))
+		greenSlider:SetValue(snap(g * 255, 1, 0, 255))
+		blueSlider:SetValue(snap(b * 255, 1, 0, 255))
+		redValue:SetText(tostring(math.floor(r * 255 + 0.5)))
+		greenValue:SetText(tostring(math.floor(g * 255 + 0.5)))
+		blueValue:SetText(tostring(math.floor(b * 255 + 0.5)))
+		caption:SetText(box.pickName or "Window")
+		caption:SetTextColor(r, g, b)
+		box.quiet = false
+	end
+	box.sync = syncSettings
+
+	local function writeScale()
+		if box.quiet then
+			return
+		end
+		local pct = snap(scaleSlider:GetValue() or 100, 5, 70, 150)
+		if math.abs((scaleSlider:GetValue() or pct) - pct) > 0.01 then
+			box.quiet = true
+			scaleSlider:SetValue(pct)
+			box.quiet = false
+		end
+		ensureLook().scale = pct / 100
+		scaleValue:SetText(pct .. "%")
+		applyLook(true)
+		fitWindows()
+		refresh()
+	end
+	local function writeFade()
+		if box.quiet then
+			return
+		end
+		local pct = snap(fadeSlider:GetValue() or 100, 1, 0, 100)
+		if math.abs((fadeSlider:GetValue() or pct) - pct) > 0.01 then
+			box.quiet = true
+			fadeSlider:SetValue(pct)
+			box.quiet = false
+		end
+		ensureLook().alpha = pct / 100
+		fadeValue:SetText(pct .. "%")
+		applyLook(true)
+		refresh()
+	end
+	local function writeOp()
+		if box.quiet then
+			return
+		end
+		local op = snap(opSlider:GetValue() or 82, 1, 0, 100)
+		if math.abs((opSlider:GetValue() or op) - op) > 0.01 then
+			box.quiet = true
+			opSlider:SetValue(op)
+			box.quiet = false
+		end
+		local r, g, b = lookColor("panel")
+		ensureLook().panel = { r, g, b, op / 100 }
+		opValue:SetText(op .. "%")
+		applyLook(true)
+		refresh()
+	end
+	local function writeRgb()
+		if box.quiet then
+			return
+		end
+		local key = box.pick or "panel"
+		local r = snap(redSlider:GetValue() or 0, 1, 0, 255)
+		local g = snap(greenSlider:GetValue() or 0, 1, 0, 255)
+		local b = snap(blueSlider:GetValue() or 0, 1, 0, 255)
+		local a = 1
+		if key == "panel" then
+			a = (opSlider:GetValue() or 82) / 100
+		else
+			local _, _, _, oldA = lookColor(key)
+			a = oldA or 1
+		end
+		ensureLook()[key] = { r / 255, g / 255, b / 255, a }
+		redValue:SetText(tostring(r))
+		greenValue:SetText(tostring(g))
+		blueValue:SetText(tostring(b))
+		caption:SetTextColor(r / 255, g / 255, b / 255)
+		applyLook(true)
+		refresh()
+		local i
+		for i = 1, table.getn(box.swatches) do
+			local swatch = box.swatches[i]
+			if swatch.key == key then
+				swatch:SetBackdropColor(r / 255, g / 255, b / 255, 1)
+			elseif key == "border" then
+				swatch:SetBackdropBorderColor(r / 255, g / 255, b / 255, 1)
+			end
+		end
+	end
+	scaleSlider:SetScript("OnValueChanged", writeScale)
+	fadeSlider:SetScript("OnValueChanged", writeFade)
+	opSlider:SetScript("OnValueChanged", writeOp)
+	redSlider:SetScript("OnValueChanged", writeRgb)
+	greenSlider:SetScript("OnValueChanged", writeRgb)
+	blueSlider:SetScript("OnValueChanged", writeRgb)
+
+	cdHit:SetScript("OnClick", function()
+		local saved = ensureLook()
+		if lookValue("cd") == false then
+			saved.cd = true
+			cdHit.mark:Show()
+		else
+			saved.cd = false
+			cdHit.mark:Hide()
+		end
+		refresh()
+	end)
+	cdHit:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "Cooldown bars", nil, {
+			{ "The thin bar under a spell icon. Green means it is ready.", 1, 1, 1 },
+		})
+	end)
+	cdHit:SetScript("OnLeave", function()
+		leaveTip()
+	end)
+	lockHit:SetScript("OnClick", function()
+		local cfg = config()
+		cfg.locked = not cfg.locked
+		if cfg.locked then
+			lockHit.mark:Show()
+		else
+			lockHit.mark:Hide()
+		end
+	end)
+	lockHit:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "Lock windows", nil, {
+			{ "Stops dragging the meter, its bubble, and extra windows.", 1, 1, 1 },
+		})
+	end)
+	lockHit:SetScript("OnLeave", function()
+		leaveTip()
+	end)
+
+	resetBtn:SetScript("OnClick", function()
+		local cfg = config()
+		local sx, sy, spoint, srel
+		if cfg.look then
+			sx, sy, spoint, srel = cfg.look.sx, cfg.look.sy, cfg.look.spoint, cfg.look.srel
+		end
+		cfg.look = nil
+		cfg.locked = false
+		if sx ~= nil and sy ~= nil then
+			cfg.look = { sx = sx, sy = sy, spoint = spoint, srel = srel }
+		end
+		syncSettings()
+		applyLook(true)
+		fitWindows()
+		refresh()
+		say("Settings reset. Numbers and window position are unchanged.")
+	end)
+	resetBtn:SetScript("OnEnter", function()
+		resetText:SetTextColor(1, 0.95, 0.75)
+		resetBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		showTip(this, "RIGHT", "Reset settings", nil, {
+			{ "Puts scale, colors, cooldown bars, and the lock back.", 1, 1, 1 },
+			{ "Numbers and where the windows sit are kept.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	resetBtn:SetScript("OnLeave", function()
+		resetText:SetTextColor(1, 0.86, 0.5)
+		applyLook(true)
+		leaveTip()
+	end)
+
+	syncSettings()
+	applyLook(true)
+	box:Hide()
+end
+
+local function toggleSettings()
+	if not settings then
+		buildSettings()
+	end
+	if settings:IsShown() then
+		settings:Hide()
+		return
+	end
+	local saved = config().look
+	if saved and saved.sx ~= nil and saved.sy ~= nil then
+		local pscale, parentLeft, parentBottom, parentTop = parentMetrics()
+		local es = pscale
+		if settings.GetEffectiveScale then
+			es = settings:GetEffectiveScale() or pscale
+		end
+		local left, top
+		if saved.srel == "TOPLEFT" then
+			left = parentLeft + saved.sx * es
+			top = parentTop + saved.sy * es
+		else
+			left = parentLeft + saved.sx * es
+			top = parentBottom + saved.sy * es
+		end
+		placeAtPixels(settings, left, top)
+	else
+		parkBeside(settings, frame)
+	end
+	if settings.sync then
+		settings.sync()
+	end
+	settings.needNudge = true
+	settings:Show()
+end
+
 local function buildMainChrome()
 	frame = CreateFrame("Frame", "AZSSpellMeterFrame", UIParent)
 	local cfg = config()
@@ -3078,12 +4123,17 @@ local function buildMainChrome()
 		frame:SetMaxResize(760, K.HEADER + K.BOTTOM + K.MAX_ROWS * K.ROW_H)
 	end
 	if frame.SetClampedToScreen then
-		frame:SetClampedToScreen(false)
+		frame:SetClampedToScreen(true)
 	end
 	frame:SetBackdrop(roundBackdrop(12))
 	frame:SetBackdropColor(0.05, 0.04, 0.03, 0.82)
 	frame:SetBackdropBorderColor(0.78, 0.58, 0.22, 1)
 
+	local openScale = lookScale()
+	if frame.SetScale then
+		frame:SetScale(openScale)
+		frame.paintedScale = openScale
+	end
 	frame:SetPoint(cfg.point or "TOPLEFT", UIParent, cfg.rel or "TOPLEFT", cfg.x or 16, cfg.y or -160)
 
 	local header = CreateFrame("Button", nil, frame)
@@ -3094,21 +4144,21 @@ local function buildMainChrome()
 	header:SetBackdropColor(0.34, 0.2, 0.06, 0.88)
 	header:SetBackdropBorderColor(0.72, 0.5, 0.16, 0.7)
 	frame.header = header
-	header:RegisterForDrag("LeftButton")
-	header:SetScript("OnDragStart", function()
-		if not config().locked then
-			dragging = true
-			frame:StartMoving()
+	local function startFrameDrag()
+		if config().locked then
+			return
 		end
-	end)
-	header:SetScript("OnDragStop", function()
+		dragging = true
+		frame:StartMoving()
+	end
+	local function stopFrameDrag()
 		dragging = false
 		frame:StopMovingOrSizing()
-		if clampIntoView(frame, 120, 20) then
-			noteClamped()
-		end
 		savePoint()
-	end)
+	end
+	header:RegisterForDrag("LeftButton")
+	header:SetScript("OnDragStart", startFrameDrag)
+	header:SetScript("OnDragStop", stopFrameDrag)
 
 	local brandBack = header:CreateTexture(nil, "ARTWORK")
 	brandBack:SetTexture(K.SOLID)
@@ -3237,13 +4287,41 @@ local function buildMainChrome()
 		})
 	end)
 	minBtn:SetScript("OnLeave", function()
-		minBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		applyLook(true)
 		leaveTip()
 	end)
 	frame.minBtn = minBtn
 
+	local setBtn = CreateFrame("Button", nil, header)
+	setBtn:SetPoint("RIGHT", minBtn, "LEFT", -4, 0)
+	setBtn:SetWidth(14)
+	setBtn:SetHeight(14)
+	setBtn:SetBackdrop(roundBackdrop(8))
+	setBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+	setBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+	local gear = setBtn:CreateTexture(nil, "OVERLAY")
+	gear:SetTexture("Interface\\Icons\\INV_Misc_Gear_08")
+	gear:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	gear:SetWidth(10)
+	gear:SetHeight(10)
+	gear:SetPoint("CENTER", setBtn, "CENTER", 0, 0)
+	setBtn:SetScript("OnClick", function()
+		toggleSettings()
+	end)
+	setBtn:SetScript("OnEnter", function()
+		setBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		showTip(this, "RIGHT", "Settings", nil, {
+			{ "Scale, colors, cooldown bars, and lock.", 1, 1, 1 },
+		})
+	end)
+	setBtn:SetScript("OnLeave", function()
+		applyLook(true)
+		leaveTip()
+	end)
+	frame.setBtn = setBtn
+
 	local resetBtn = CreateFrame("Button", nil, header)
-	resetBtn:SetPoint("RIGHT", minBtn, "LEFT", -4, 0)
+	resetBtn:SetPoint("RIGHT", setBtn, "LEFT", -4, 0)
 	resetBtn:SetHeight(14)
 	resetBtn:SetWidth(42)
 	resetBtn:SetBackdrop(roundBackdrop(8))
@@ -3271,23 +4349,11 @@ local function buildMainChrome()
 	resetBtn:SetScript("OnEnter", function()
 		resetText:SetTextColor(1, 0.95, 0.7)
 		resetBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
-		local mode = viewMode()
-		local line = "Starts the damage view over, including kills."
-		if mode == "healing" then
-			line = "Starts the healing view over. Damage and kills are kept."
-		elseif mode == "boss" then
-			line = "Starts the boss view over. Damage and kills are kept."
-		elseif mode == "taken" then
-			line = "Starts the taken view over. Damage dealt and kills are kept."
-		end
-		showTip(this, "RIGHT", "Reset", nil, {
-			{ line, 1, 1, 1 },
-			{ "The built-in meter keeps its own numbers.", 0.75, 0.75, 0.75 },
-		})
+		showHeaderTip("reset", viewMode())
 	end)
 	resetBtn:SetScript("OnLeave", function()
 		resetText:SetTextColor(1, 0.86, 0.5)
-		resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		applyLook(true)
 		leaveTip()
 	end)
 	frame.resetBtn = resetBtn
@@ -3304,34 +4370,11 @@ local function buildMainChrome()
 	dpsText:SetTextColor(0.78, 0.95, 0.72)
 	frame.dpsText = dpsText
 	frame.dpsBtn = dpsBtn
+	dpsBtn:RegisterForDrag("LeftButton")
+	dpsBtn:SetScript("OnDragStart", startFrameDrag)
+	dpsBtn:SetScript("OnDragStop", stopFrameDrag)
 	dpsBtn:SetScript("OnEnter", function()
-		local mode = viewMode()
-		local title = "DPS"
-		local body = "The run's damage per second, from the game's own clock."
-		if mode == "healing" then
-			title = "HPS"
-			body = "Healing per second over the run's clock. Overhealing is left out."
-		elseif mode == "boss" then
-			body = "Damage per second of this boss fight."
-		elseif mode == "taken" then
-			body = "Damage taken per second over the run's clock."
-		end
-		local bKey = baseFields()
-		if state and state[bKey] then
-			if mode == "healing" then
-				body = "Healing per second since the last reset, on the game's clock."
-			elseif mode == "boss" then
-				body = "Boss damage per second since the last reset."
-			elseif mode == "taken" then
-				body = "Damage taken per second since the last reset."
-			else
-				body = "Damage per second since the last reset, on the game's clock."
-			end
-		end
-		showTip(this, "LEFT", title, nil, {
-			{ body, 1, 1, 1 },
-			{ "It pauses whenever the run pauses.", 0.75, 0.75, 0.75 },
-		})
+		showHeaderTip("dps", viewMode())
 	end)
 	dpsBtn:SetScript("OnLeave", function()
 		leaveTip()
@@ -3352,93 +4395,11 @@ local function buildMainChrome()
 	if frame.brandText then
 		frame.brandText:SetPoint("RIGHT", totalBtn, "LEFT", -8, 0)
 	end
+	totalBtn:RegisterForDrag("LeftButton")
+	totalBtn:SetScript("OnDragStart", startFrameDrag)
+	totalBtn:SetScript("OnDragStop", stopFrameDrag)
 	totalBtn:SetScript("OnEnter", function()
-		local mode = viewMode()
-		local title = "Damage"
-		local tip = "Damage dealt this run, as the game counted it."
-		if mode == "healing" then
-			title = "Healing"
-			tip = "Healing this run, as the game counted it. Overhealing is left out."
-		elseif mode == "boss" then
-			title = "Boss"
-			tip = "Damage dealt in the last boss fight. It stays until the next boss."
-		elseif mode == "taken" then
-			title = "Taken"
-			tip = "Damage you took this run, split by what hit you."
-		end
-		local bKey = baseFields()
-		if state and state[bKey] then
-			tip = "Since the last reset on this view, still counted by the game."
-		end
-		local lines = {
-			{ tip, 1, 1, 1 },
-		}
-		local stats = AZS_STATS
-		if stats then
-			local function push(text)
-				if text and table.getn(lines) < 8 then
-					local n = table.getn(lines) + 1
-					lines[n] = { text, 0.82, 0.78, 0.62 }
-				end
-			end
-			local function mult(v)
-				v = tonumber(v)
-				if not v or v == 0 then
-					return nil
-				end
-				return string.format("x%.2f", v)
-			end
-			local function pct(v)
-				v = tonumber(v)
-				if not v or v == 0 then
-					return nil
-				end
-				if v > 0 and v <= 1.5 then
-					return string.format("%.0f%%", v * 100)
-				end
-				return string.format("%.0f%%", v)
-			end
-			local function num(v)
-				v = tonumber(v)
-				if not v or v == 0 then
-					return nil
-				end
-				if v == math.floor(v) then
-					return string.format("%d", v)
-				end
-				return string.format("%.2f", v)
-			end
-			local text
-			text = mult(stats.dmg)
-			if text then
-				push("Damage " .. text)
-			end
-			text = pct(stats.crit)
-			if text then
-				push("Crit " .. text)
-			end
-			text = mult(stats.cm)
-			if text then
-				push("Crit damage " .. text)
-			end
-			text = mult(stats.cd)
-			if text then
-				push("Cooldown " .. text)
-			end
-			text = num(stats.cnt)
-			if text then
-				push("Extra targets " .. text)
-			end
-			text = num(stats.area)
-			if text then
-				push("Area " .. text)
-			end
-			text = num(stats.echo)
-			if text then
-				push("Echo " .. text)
-			end
-		end
-		showTip(this, "LEFT", title, nil, lines)
+		showHeaderTip("total", viewMode())
 	end)
 	totalBtn:SetScript("OnLeave", function()
 		leaveTip()
@@ -3594,7 +4555,7 @@ local function buildMainList()
 	tip:SetWidth(160)
 	tip:SetHeight(40)
 	if tip.SetClampedToScreen then
-		tip:SetClampedToScreen(false)
+		tip:SetClampedToScreen(true)
 	end
 	tip:SetBackdrop(roundBackdrop(12))
 	tip:SetBackdropColor(0.05, 0.04, 0.03, 0.9)
@@ -3674,10 +4635,10 @@ local function buildMainList()
 	bubble:SetHeight(22)
 	bubble:SetMovable(true)
 	bubble:EnableMouse(true)
-	bubble:RegisterForDrag("LeftButton")
+	bubble:EnableMouse(true)
 	bubble:RegisterForClicks("LeftButtonUp")
 	if bubble.SetClampedToScreen then
-		bubble:SetClampedToScreen(false)
+		bubble:SetClampedToScreen(true)
 	end
 	bubble:SetBackdrop(roundBackdrop(12))
 	bubble:SetBackdropColor(0.28, 0.16, 0.05, 0.9)
@@ -3691,6 +4652,7 @@ local function buildMainList()
 	bubbleText:SetTextColor(1, 0.9, 0.55)
 	frame.bubbleText = bubbleText
 	bubble.moving = false
+	bubble:RegisterForDrag("LeftButton")
 	bubble:SetScript("OnDragStart", function()
 		if config().locked then
 			return
@@ -3700,11 +4662,15 @@ local function buildMainList()
 	end)
 	bubble:SetScript("OnDragStop", function()
 		bubble:StopMovingOrSizing()
-		if clampIntoView(bubble, 36, 18) then
-			noteClamped()
-		end
 	end)
+	if bubble.RegisterForClicks then
+		bubble:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	end
 	bubble:SetScript("OnClick", function()
+		if arg1 == "RightButton" then
+			toggleSettings()
+			return
+		end
 		if bubble.moving then
 			bubble.moving = false
 			return
@@ -3716,11 +4682,11 @@ local function buildMainList()
 	bubble:SetScript("OnEnter", function()
 		bubble:SetBackdropBorderColor(1, 0.86, 0.45, 1)
 		showTip(this, "RIGHT", "Spell meter", nil, {
-			{ "Click to open the window.", 1, 1, 1 },
+			{ "Click to open the window. Right-click for settings.", 1, 1, 1 },
 		})
 	end)
 	bubble:SetScript("OnLeave", function()
-		bubble:SetBackdropBorderColor(0.85, 0.62, 0.2, 1)
+		applyLook(true)
 		leaveTip()
 	end)
 	bubble:SetScript("OnUpdate", onBubbleUpdate)
@@ -3728,6 +4694,7 @@ local function buildMainList()
 
 	frame.rows = rows
 	frame.headH = K.HEADER
+	applyLook(true)
 	restorePops()
 	applyShown()
 	refresh()
@@ -3882,6 +4849,13 @@ end)
 local function toggleLock()
 	local cfg = config()
 	cfg.locked = not cfg.locked
+	if settings and settings.lockMark then
+		if cfg.locked then
+			settings.lockMark:Show()
+		else
+			settings.lockMark:Hide()
+		end
+	end
 	if cfg.locked then
 		say("Locked.")
 	else
@@ -3977,6 +4951,8 @@ SlashCmdList["AZSSPELLMETER"] = function(msg)
 		end
 	elseif msg == "lock" then
 		toggleLock()
+	elseif msg == "settings" or msg == "config" then
+		toggleSettings()
 	elseif msg == "test" then
 		config().shown = true
 		config().mini = false
@@ -4000,6 +4976,6 @@ SlashCmdList["AZSSPELLMETER"] = function(msg)
 			say(lastRaw)
 		end
 	else
-		say("/azsm show, hide, reset, resetpos, lock, test, debug")
+		say("/azsm show, hide, reset, resetpos, lock, settings, test, debug")
 	end
 end

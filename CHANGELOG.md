@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.23
+
+Tested with game 0.104.0.
+
+- A gear on the title bar opens settings. Right-click the bubble, or type `/azsm settings`, for the same window.
+- Scale changes the main window, the bubble, and any extra windows together. Each one grows from its own top-left corner.
+- Opacity fades the whole window. Background fades only the panel fill, so the text can stay readable.
+- Colors cover the window, its border, and each view's title, bars, and numbers.
+- Cooldown bars under spell icons can be turned off. Lock stops the windows from being dragged.
+- Reset settings puts those back. Numbers and where the windows sit are kept.
+- Windows, including ones that open beside the main window, stay on the screen. Tooltips stay on screen and sit next to the cursor.
+- The total, DPS, and Reset on an extra window have the same tooltips as the main window.
+- Drag the title, or the damage and DPS numbers, to move a window.
+
 ## 1.22
 
 Tested with game 0.102.2.
