@@ -2,7 +2,7 @@
 
 ## 1.24
 
-Tested with game 0.104.0.
+Tested with game 0.105.0.
 
 - DPS is the last 10 seconds of the run, not the average since the start. Healing, boss damage, and damage taken use the same window. It still pauses while the run is paused.
 - A kill from the English combat log is added to the translated spell row when the icon matches one spell on the meter.

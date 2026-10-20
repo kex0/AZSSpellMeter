@@ -48,7 +48,7 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ### 1.24
 
-Tested with game 0.104.0.
+Tested with game 0.105.0.
 
 - DPS is the last 10 seconds of the run. Kills from the English combat log stay on the translated spell row.
 
