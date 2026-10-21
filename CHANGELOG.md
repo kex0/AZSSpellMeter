@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.25
+
+Tested with game 0.107.0.
+
+- Talents that trigger a spell, such as Flurry and Rampage, now show on that spell instead of as their own row.
+- Hovering one of those talents no longer lists kills.
+
 ## 1.24
 
 Tested with game 0.105.0.

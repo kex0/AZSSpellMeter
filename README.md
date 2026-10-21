@@ -9,7 +9,7 @@ Per-spell damage for [Azeroth Survivors](https://wow.aethus.pl/). Damage and eac
 The built-in meter is the right tally. This one reads those same numbers and adds the things it doesn't show.
 
 - **Kills per spell.** The kill column is how many creatures that spell finished.
-- **The spell that was actually cast.** Pyroclasm's explosion is Blast Wave. Damage Done lists Pyroclasm on its own. This meter puts that damage on Blast Wave and leaves a proc button beside it. Upgrading Blast Wave is what upgrades the proc, and the row makes that obvious. Hover the button for the proc's own damage, DPS, kills, and icon.
+- **The spell that was actually cast.** Pyroclasm's explosion is Blast Wave. Damage Done lists Pyroclasm on its own. This meter puts that damage on Blast Wave and leaves a proc button beside it. Upgrading Blast Wave is what upgrades the proc, and the row makes that obvious. Hover the button for the proc's own damage, DPS, and icon.
 - **Sortable columns.** Click Kills, Damage, or DPS. Click again to reverse the order.
 - **A reset that is yours.** Reset starts this window over. The built-in meter keeps its own numbers, so you can measure a stretch of the run without wiping the game's tally.
 - **It gets out of the way.** The minus button collapses the window onto a small bubble. Click the bubble to open it again.
@@ -45,6 +45,13 @@ While the main window, its bubble, or an extra window is open, the built-in Dama
 The window position is remembered across updates. Deleting the addon folder does not clear it. If the window is missing, type `/azsm resetpos`.
 
 ## Changelog
+
+### 1.25
+
+Tested with game 0.107.0.
+
+- Talents that trigger a spell, such as Flurry and Rampage, now show on that spell instead of as their own row.
+- Hovering one of those talents no longer lists kills.
 
 ### 1.24
 

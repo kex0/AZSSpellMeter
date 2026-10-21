@@ -7,8 +7,9 @@
 -- while another view is open, and they are not drawn there. The log names spells
 -- in English; a localized meter is joined to those kills by the spell icon.
 -- DPS is the last 10 seconds of the run clock, not the average since the start.
--- A proc is grouped onto the spell it casts (Pyroclasm onto Blast Wave). The row
--- is that spell; the proc's own numbers are on its button.
+-- A proc is grouped onto the spell it casts (Hot Streak onto Pyroblast). One that
+-- casts several spells is split across the ones on the meter. The row is that
+-- spell; the proc's own numbers are on its button.
 -- Rows sit in a scroll frame at a fixed height. The frame clips whatever does not
 -- fit, so a resize can leave the last spell only partly in view.
 
@@ -732,6 +733,8 @@ local QUESTION = "Interface\\Icons\\INV_Misc_QuestionMark"
 
 -- Talents the meter names on their own, and the spell the combat log actually prints.
 -- Built from the game's talent text. Pyroclasm's explosion is logged as Blast Wave.
+-- A list is every spell that talent can cast. One spell takes the whole proc.
+-- Several spells that are all on the meter share it, so the damage is not counted twice.
 local PROC_CAST = {
 	["Pyroclasm"] = { "Blast Wave" },
 	["Hot Streak"] = { "Pyroblast" },
@@ -740,6 +743,35 @@ local PROC_CAST = {
 	["Maelstrom Weapon"] = { "Chain Lightning" },
 	["Lightning Overload"] = { "Lightning Bolt", "Chain Lightning" },
 	["Windfury"] = { "Lightning Bolt", "Earth Shock", "Frost Shock" },
+	["Elemental Mastery"] = { "Chain Lightning" },
+	["Rampage"] = { "Whirlwind" },
+	["Flurry"] = { "Whirlwind", "Bloodthirst" },
+	["Bladestorm"] = { "Whirlwind" },
+	["Last Stand"] = { "Shield Slam" },
+	["Shockwave"] = { "Shield Slam" },
+	["Daybreak"] = { "Holy Wrath" },
+	["Hallowed Ground"] = { "Consecration" },
+	["Divine Intervention"] = { "Consecration" },
+	["The Art of War"] = { "Exorcism" },
+	["Frenzy"] = { "Multi-Shot" },
+	["Rapid Fire"] = { "Aimed Shot" },
+	["Counterattack"] = { "Explosive Trap" },
+	["Explosive Ammunition"] = { "Auto Shot", "Multi-Shot" },
+	["Mutilate"] = { "Sinister Strike", "Backstab" },
+	["Riposte"] = { "Ghostly Strike" },
+	["Killing Spree"] = { "Sinister Strike" },
+	["Blade Flurry"] = { "Sinister Strike", "Eviscerate" },
+	["Preparation"] = { "Gouge" },
+	["Shadow Dance"] = { "Backstab", "Eviscerate" },
+	["Chastise"] = { "Holy Nova" },
+	["Nightfall"] = { "Shadow Bolt" },
+	["Shadow Cleave"] = { "Shadow Bolt" },
+	["Conflagrate"] = { "Shadow Bolt", "Searing Pain" },
+	["Splitting Ice"] = { "Frostbolt" },
+	["Omen of Clarity"] = { "Starfire" },
+	["Starfall"] = { "Starfire" },
+	["Leader of the Pack"] = { "Swipe" },
+	["Nature's Grasp"] = { "Entangling Roots" },
 }
 
 -- Custom talents are not in Spell.dbc, so the generated icon list has no row for them.
@@ -1216,27 +1248,26 @@ local function windowReset(dropTest, mode)
 	end
 end
 
--- One parent spell when the proc names a single cast, or only one of its
--- casts is on the meter. Several casts at once stay separate: the damage
--- cannot be split between them.
-local function anchorSpell(procName, present)
+-- The spells this proc casts that are on the meter. One named spell is always
+-- the parent, even before that spell has a row. Several spells share the proc
+-- across whichever of them are present.
+local function anchorSpells(procName, present)
 	local casts = PROC_CAST[procName]
 	if not casts then
 		return nil
 	end
-	local n = table.getn(casts)
-	if n == 1 then
-		return casts[1]
+	if table.getn(casts) == 1 then
+		return casts
 	end
-	local found = nil
+	local found = {}
 	local i
-	for i = 1, n do
+	for i = 1, table.getn(casts) do
 		if present[casts[i]] then
-			if found then
-				return nil
-			end
-			found = casts[i]
+			found[table.getn(found) + 1] = casts[i]
 		end
+	end
+	if not found[1] then
+		return nil
 	end
 	return found
 end
@@ -1381,16 +1412,17 @@ local function rebuild(mode)
 	if windowRate then
 		meterDps = windowRate
 	end
-	-- Fold a proc into the spell it actually casts: one Blast Wave row, and
-	-- Pyroclasm lives on the proc button. Collect first; pairs cannot drop keys.
+	-- Fold a proc into the spell it actually casts: one Pyroblast row, and Hot
+	-- Streak lives on the proc button. Several casts share the proc. Collect
+	-- first; pairs cannot drop keys.
 	local merges = {}
 	local procName, row
 	for procName, row in pairs(bucket) do
 		if row.proc or PROC_CAST[procName] then
-			local parentName = anchorSpell(procName, bucket)
-			if parentName and parentName ~= procName then
+			local parents = anchorSpells(procName, bucket)
+			if parents and not (table.getn(parents) == 1 and parents[1] == procName) then
 				local mi = table.getn(merges) + 1
-				merges[mi] = { proc = procName, parent = parentName }
+				merges[mi] = { proc = procName, parents = parents }
 			end
 		end
 	end
@@ -1399,21 +1431,40 @@ local function rebuild(mode)
 		local link = merges[mi]
 		row = bucket[link.proc]
 		if row then
-			local parent = bucketOf(link.parent)
-			parent.damage = (parent.damage or 0) + (row.damage or 0)
-			parent.dps = (parent.dps or 0) + (row.dps or 0)
-			parent.kills = (parent.kills or 0) + (row.kills or 0)
-			if (row.damage or 0) > 0 or (showsKills(mode) and (row.kills or 0) > 0) then
-				if not parent.procs then
-					parent.procs = {}
+			local parents = link.parents
+			local pc = table.getn(parents)
+			local dmg = row.damage or 0
+			local rate = row.dps or 0
+			local kills = row.kills or 0
+			local usedDmg = 0
+			local usedRate = 0
+			for pi = 1, pc do
+				local partDmg = dmg / pc
+				local partRate = rate / pc
+				if pi == pc then
+					partDmg = dmg - usedDmg
+					partRate = rate - usedRate
 				end
-				local pi = table.getn(parent.procs) + 1
-				parent.procs[pi] = {
-					name = link.proc,
-					damage = row.damage or 0,
-					dps = row.dps or 0,
-					kills = row.kills or 0,
-				}
+				usedDmg = usedDmg + partDmg
+				usedRate = usedRate + partRate
+				local parent = bucketOf(parents[pi])
+				parent.damage = (parent.damage or 0) + partDmg
+				parent.dps = (parent.dps or 0) + partRate
+				if pi == 1 then
+					parent.kills = (parent.kills or 0) + kills
+				end
+				if partDmg > 0 or (pi == 1 and showsKills(mode) and kills > 0) then
+					if not parent.procs then
+						parent.procs = {}
+					end
+					local slot = table.getn(parent.procs) + 1
+					parent.procs[slot] = {
+						name = link.proc,
+						damage = partDmg,
+						dps = partRate,
+						kills = 0,
+					}
+				end
 			end
 			bucket[link.proc] = nil
 		end
@@ -2757,7 +2808,7 @@ local function createRow(parent, index)
 				{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
 				{ string.format("%s %s", rateWord, fmtRate(data.dps or 0)), 0.7, 0.92, 0.68 },
 			}
-			if killView then
+			if killView and not isProc(data.proc) and not data.cast then
 				table.insert(lines, { string.format("Kills %d", data.kills or 0), 1, 0.82, 0.45 })
 			end
 			if data.procs and data.procs[1] then
@@ -2807,7 +2858,7 @@ local function createRow(parent, index)
 				if host and host.total then
 					total = host.total
 				end
-				local amountWord, rateWord, killView = meterWords(host and host.fixed)
+				local amountWord, rateWord = meterWords(host and host.fixed)
 				local share = 0
 				if total > 0 then
 					share = (info.damage or 0) / total
@@ -2816,11 +2867,8 @@ local function createRow(parent, index)
 					{ string.format("%s %s", amountWord, comma(info.damage or 0)), 1, 1, 1 },
 					{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
 					{ string.format("%s %s", rateWord, fmtRate(info.dps or 0)), 0.7, 0.92, 0.68 },
+					{ "Proc.", 0.65, 0.78, 1 },
 				}
-				if killView then
-					table.insert(lines, { string.format("Kills %d", info.kills or 0), 1, 0.82, 0.45 })
-				end
-				table.insert(lines, { "Proc.", 0.65, 0.78, 1 })
 				paintTip(info.name, iconFor(info.name), lines)
 			end)
 			this:SetBackdropBorderColor(0.7, 0.86, 1, 1)
