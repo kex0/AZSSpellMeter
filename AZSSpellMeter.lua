@@ -6,7 +6,8 @@
 -- Kills are credited from the combat log on the damage view. They keep counting
 -- while another view is open, and they are not drawn there. The log names spells
 -- in English; a localized meter is joined to those kills by the spell icon.
--- DPS is the last 10 seconds of the run clock, not the average since the start.
+-- DPS is a window of the run clock. It is 10 seconds unless the player picks
+-- another length, or the average since the start.
 -- A proc is grouped onto the spell it casts (Hot Streak onto Pyroblast). One that
 -- casts several spells is split across the ones on the meter. The row is that
 -- spell; the proc's own numbers are on its button.
@@ -560,7 +561,6 @@ local function ingest(msg, kind)
 	end
 end
 
-local RATE_WINDOW = 10
 local rateHist = {}
 
 local function clearRecentRate(mode)
@@ -571,9 +571,34 @@ local function clearRecentRate(mode)
 	rateHist[mode] = nil
 end
 
--- Damage now, minus the sample from about 10 seconds of run time ago.
+-- Seconds of run time DPS looks back. Nil in saved settings means 10.
+-- dpsAll uses the meter's own average instead, which is the whole run,
+-- or the time since Reset on a view that was reset.
+local function rateSeconds()
+	local saved = config().look
+	if saved and saved.dpsAll then
+		return 0
+	end
+	local n = nil
+	if saved then
+		n = tonumber(saved.dps)
+	end
+	if not n or n < 5 then
+		return 10
+	end
+	if n > 120 then
+		return 120
+	end
+	return n
+end
+
+-- Damage now, minus the sample from one window of run time ago.
 -- The first second keeps the meter's own average so the number does not spike.
 local function recentRate(mode, now, total, bucket)
+	local window = rateSeconds()
+	if window < 5 then
+		return nil
+	end
 	if not mode or mode == "" then
 		return nil
 	end
@@ -603,7 +628,7 @@ local function recentRate(mode, now, total, bucket)
 		end
 		table.insert(hist, snap)
 	end
-	while table.getn(hist) > 0 and (now - hist[1].t) > RATE_WINDOW do
+	while table.getn(hist) > 0 and (now - hist[1].t) > window do
 		table.remove(hist, 1)
 	end
 	local base = hist[1]
@@ -614,8 +639,8 @@ local function recentRate(mode, now, total, bucket)
 	if span < 1 then
 		return nil
 	end
-	if span > RATE_WINDOW then
-		span = RATE_WINDOW
+	if span > window then
+		span = window
 	end
 	local name, row
 	for name, row in pairs(bucket) do
@@ -2599,14 +2624,48 @@ local function showHeaderTip(kind, mode)
 	end
 	if kind == "dps" then
 		local title = "DPS"
-		local body = "Damage per second over the last 10 seconds of the run."
-		if mode == "healing" then
-			title = "HPS"
-			body = "Healing per second over the last 10 seconds. Overhealing is left out."
-		elseif mode == "boss" then
-			body = "Damage per second over the last 10 seconds of this boss fight."
-		elseif mode == "taken" then
-			body = "Damage taken per second over the last 10 seconds."
+		local n = rateSeconds()
+		local reset = false
+		if state then
+			local bKey = baseFields(mode)
+			if state[bKey] then
+				reset = true
+			end
+		end
+		local body
+		if n < 5 then
+			body = "Average damage per second since the start of the run."
+			if reset then
+				body = "Average damage per second since the last reset."
+			end
+			if mode == "healing" then
+				title = "HPS"
+				body = "Average healing per second since the start of the run. Overhealing is left out."
+				if reset then
+					body = "Average healing per second since the last reset. Overhealing is left out."
+				end
+			elseif mode == "boss" then
+				body = "Average damage per second for this boss fight."
+				if reset then
+					body = "Average damage per second since the last reset on this fight."
+				end
+			elseif mode == "taken" then
+				body = "Average damage taken per second since the start of the run."
+				if reset then
+					body = "Average damage taken per second since the last reset."
+				end
+			end
+		else
+			local span = n .. " seconds"
+			body = "Damage per second over the last " .. span .. " of the run."
+			if mode == "healing" then
+				title = "HPS"
+				body = "Healing per second over the last " .. span .. ". Overhealing is left out."
+			elseif mode == "boss" then
+				body = "Damage per second over the last " .. span .. " of this boss fight."
+			elseif mode == "taken" then
+				body = "Damage taken per second over the last " .. span .. "."
+			end
 		end
 		showTip(this, "LEFT", title, nil, {
 			{ body, 1, 1, 1 },
@@ -3723,7 +3782,7 @@ local function buildSettings()
 	local box = CreateFrame("Frame", "AZSSpellMeterSettings", UIParent)
 	settings = box
 	box:SetWidth(248)
-	box:SetHeight(370)
+	box:SetHeight(424)
 	box:SetFrameStrata("DIALOG")
 	box:SetMovable(true)
 	box:EnableMouse(true)
@@ -3891,6 +3950,9 @@ local function buildSettings()
 	local opSlider, opValue = makeSlider(-102, "Background", 0, 100, 1)
 	box.opSlider = opSlider
 	box.opValue = opValue
+	local dpsSlider, dpsValue, dpsName = makeSlider(-138, "DPS window", 5, 120, 5)
+	box.dpsSlider = dpsSlider
+	box.dpsValue = dpsValue
 
 	local function makeCheck(y, text)
 		local hit = CreateFrame("Button", nil, box)
@@ -3920,13 +3982,15 @@ local function buildSettings()
 		return hit
 	end
 
-	local cdHit = makeCheck(-138, "Cooldown bars")
+	local dpsAllHit = makeCheck(-174, "Since the start")
+	box.dpsAllMark = dpsAllHit.mark
+	local cdHit = makeCheck(-192, "Cooldown bars")
 	box.cdMark = cdHit.mark
-	local lockHit = makeCheck(-156, "Lock windows")
+	local lockHit = makeCheck(-210, "Lock windows")
 	box.lockMark = lockHit.mark
 
 	local colors = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	colors:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -180)
+	colors:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -234)
 	colors:SetText("Colors")
 	face(colors, 10)
 	colors:SetTextColor(1, 0.9, 0.62)
@@ -3949,7 +4013,7 @@ local function buildSettings()
 		local b = CreateFrame("Button", nil, box)
 		b:SetWidth(sw)
 		b:SetHeight(sw)
-		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -196)
+		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -250)
 		b:SetBackdrop(roundBackdrop(8))
 		b.key = spec.key
 		b.pickName = spec.name
@@ -3971,15 +4035,15 @@ local function buildSettings()
 	end
 
 	local caption = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -224)
+	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -278)
 	caption:SetText("Window")
 	face(caption, 10)
 	caption:SetTextColor(1, 0.9, 0.62)
 	box.caption = caption
 
-	local redSlider, redValue, redName = makeSlider(-242, "Red", 0, 255, 1)
-	local greenSlider, greenValue, greenName = makeSlider(-274, "Green", 0, 255, 1)
-	local blueSlider, blueValue, blueName = makeSlider(-306, "Blue", 0, 255, 1)
+	local redSlider, redValue, redName = makeSlider(-296, "Red", 0, 255, 1)
+	local greenSlider, greenValue, greenName = makeSlider(-328, "Green", 0, 255, 1)
+	local blueSlider, blueValue, blueName = makeSlider(-360, "Blue", 0, 255, 1)
 	redName:SetTextColor(1, 0.55, 0.45)
 	greenName:SetTextColor(0.55, 0.9, 0.55)
 	blueName:SetTextColor(0.55, 0.75, 1)
@@ -4020,6 +4084,23 @@ local function buildSettings()
 		local op = snap(pa * 100, 1, 0, 100)
 		opSlider:SetValue(op)
 		opValue:SetText(op .. "%")
+		local window = snap(tonumber(lookValue("dps")) or 10, 5, 5, 120)
+		dpsSlider:SetValue(window)
+		if lookValue("dpsAll") then
+			dpsAllHit.mark:Show()
+			dpsValue:SetText("Since start")
+			dpsName:SetTextColor(0.45, 0.4, 0.32)
+			dpsValue:SetTextColor(0.55, 0.5, 0.4)
+			dpsSlider:EnableMouse(false)
+			dpsSlider:EnableMouseWheel(false)
+		else
+			dpsAllHit.mark:Hide()
+			dpsValue:SetText(window .. " s")
+			dpsName:SetTextColor(0.85, 0.78, 0.62)
+			dpsValue:SetTextColor(1, 0.9, 0.62)
+			dpsSlider:EnableMouse(true)
+			dpsSlider:EnableMouseWheel(true)
+		end
 		if lookValue("cd") == false then
 			cdHit.mark:Hide()
 		else
@@ -4103,6 +4184,24 @@ local function buildSettings()
 		applyLook(true)
 		refresh()
 	end
+	local function writeDps()
+		if box.quiet then
+			return
+		end
+		local window = snap(dpsSlider:GetValue() or 10, 5, 5, 120)
+		if math.abs((dpsSlider:GetValue() or window) - window) > 0.01 then
+			box.quiet = true
+			dpsSlider:SetValue(window)
+			box.quiet = false
+		end
+		ensureLook().dps = window
+		if lookValue("dpsAll") then
+			dpsValue:SetText("Since start")
+		else
+			dpsValue:SetText(window .. " s")
+		end
+		refresh()
+	end
 	local function writeRgb()
 		if box.quiet then
 			return
@@ -4138,10 +4237,39 @@ local function buildSettings()
 	scaleSlider:SetScript("OnValueChanged", writeScale)
 	fadeSlider:SetScript("OnValueChanged", writeFade)
 	opSlider:SetScript("OnValueChanged", writeOp)
+	dpsSlider:SetScript("OnValueChanged", writeDps)
+	dpsSlider:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "DPS window", nil, {
+			{ "How many seconds DPS looks back, from 5 to 120.", 1, 1, 1 },
+			{ "It pauses while the run is paused.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	dpsSlider:SetScript("OnLeave", function()
+		leaveTip()
+	end)
 	redSlider:SetScript("OnValueChanged", writeRgb)
 	greenSlider:SetScript("OnValueChanged", writeRgb)
 	blueSlider:SetScript("OnValueChanged", writeRgb)
 
+	dpsAllHit:SetScript("OnClick", function()
+		local saved = ensureLook()
+		if saved.dpsAll then
+			saved.dpsAll = nil
+		else
+			saved.dpsAll = true
+		end
+		syncSettings()
+		refresh()
+	end)
+	dpsAllHit:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "Since the start", nil, {
+			{ "Uses the average for the whole run, instead of the window above.", 1, 1, 1 },
+			{ "On Boss it is the whole fight. A reset starts that average over.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	dpsAllHit:SetScript("OnLeave", function()
+		leaveTip()
+	end)
 	cdHit:SetScript("OnClick", function()
 		local saved = ensureLook()
 		if lookValue("cd") == false then
@@ -4200,7 +4328,7 @@ local function buildSettings()
 		resetText:SetTextColor(1, 0.95, 0.75)
 		resetBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
 		showTip(this, "RIGHT", "Reset settings", nil, {
-			{ "Puts scale, colors, cooldown bars, and the lock back.", 1, 1, 1 },
+			{ "Puts scale, the DPS window, colors, cooldown bars, and the lock back.", 1, 1, 1 },
 			{ "Numbers and where the windows sit are kept.", 0.75, 0.75, 0.75 },
 		})
 	end)
@@ -4476,7 +4604,7 @@ local function buildMainChrome()
 	setBtn:SetScript("OnEnter", function()
 		setBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
 		showTip(this, "RIGHT", "Settings", nil, {
-			{ "Scale, colors, cooldown bars, and lock.", 1, 1, 1 },
+			{ "Scale, DPS window, colors, cooldown bars, and lock.", 1, 1, 1 },
 		})
 	end)
 	setBtn:SetScript("OnLeave", function()

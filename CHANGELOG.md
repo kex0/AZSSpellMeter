@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.26
+
+Tested with game 0.107.0.
+
+- You can choose how far back DPS looks. It still starts at 10 seconds, from 5 seconds up to 2 minutes.
+- Since the start shows the average for the whole run.
+
 ## 1.25
 
 Tested with game 0.107.0.
