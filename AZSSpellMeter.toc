@@ -2,7 +2,7 @@
 ## Title: AZS Spell Meter
 ## Notes: Per-spell damage, healing, boss damage, damage taken, and party damage. Each view can open in its own window.
 ## SavedVariables: AZSSpellMeterDB
-## Version: 1.29
+## Version: 1.30
 
 Icons.lua
 SpellNames.lua

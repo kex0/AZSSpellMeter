@@ -875,10 +875,122 @@ local EXTRA_ICONS = {
 	["Maelstrom Weapon"] = "Spell_Nature_Lightning",
 	["Leech"] = "Spell_Shadow_LifeDrain",
 	["Onyxia Tooth Pendant"] = "INV_Jewelry_Necklace_09",
+	["Choker of the Fire Lord"] = "INV_Jewelry_Amulet_05",
+	["Choker of Enlightenment"] = "INV_Jewelry_Necklace_10",
+	["Prestor's Talisman of Connivery"] = "INV_Jewelry_Necklace_17",
+	["Animated Chain Necklace"] = "INV_Jewelry_Necklace_01",
+	["Woven Ivy Necklace"] = "INV_Misc_Herb_15",
+	["Amulet of the Darkmoon"] = "INV_Jewelry_Necklace_14",
+	["Jeklik's Opaline Talisman"] = "INV_Jewelry_Necklace_03",
+	["The Eye of Hakkar"] = "INV_Jewelry_Necklace_22",
+	["Medallion of Steadfast Might"] = "INV_Jewelry_Amulet_03",
+	["Amulet of Vek'nilash"] = "INV_Jewelry_Necklace_AhnQiraj_01",
+	["Pendant of the Fallen Dragon"] = "INV_Jewelry_Necklace_12",
+	["Malice Stone Pendant"] = "INV_Jewelry_Necklace_29",
 	["Infernal"] = "Spell_Shadow_SummonInfernal",
 	["Doomguard"] = "Spell_Shadow_SummonInfernal",
 	["Felguard"] = "Spell_Shadow_Metamorphosis",
 	["Divine Storm"] = "Spell_Holy_SealOfRighteousness",
+	["Imp"] = "Spell_Shadow_SummonImp",
+	["Felhunter"] = "Spell_Shadow_SummonFelHunter",
+	["Succubus"] = "Spell_Shadow_SummonSuccubus",
+	["Pit Lord"] = "Spell_Shadow_UnholyStrength",
+	["Amulet of the Ancients"] = "INV_Jewelry_Necklace_13",
+	["Amulet of the Inferno"] = "INV_Jewelry_Necklace_AhnQiraj_03",
+	["Arcane Fortitude"] = "Spell_Arcane_ArcaneResilience",
+	["Arcane Reach"] = "Spell_Arcane_StarFire",
+	["Archimtiros' Ring of Reckoning"] = "INV_Jewelry_Ring_40",
+	["Ardent Defender"] = "Spell_Holy_HolyProtection",
+	["Band of Accuria"] = "INV_Jewelry_Ring_15",
+	["Blackhand's Breadth"] = "INV_Misc_ArmorKit_09",
+	["Blessed Life"] = "Spell_Holy_GreaterBlessingofSanctuary",
+	["Blooddrinker's Band"] = "INV_Jewelry_Ring_49Naxxramas",
+	["Breath of the Black Dragon"] = "INV_Jewelry_Necklace_27Naxxramas",
+	["Call of the Elements"] = "Spell_Totem_WardOfDraining",
+	["Contagion"] = "Spell_Shadow_PlagueCloud",
+	["Dashing Scarlet Cloak"] = "INV_Misc_Cape_08",
+	["Daybreak"] = "Spell_Holy_Excorcism",
+	["Defias Bandana"] = "INV_Misc_Bandana_03",
+	["Demonic Empowerment"] = "Spell_Nature_RemoveCurse",
+	["Demonic Supremacy"] = "Spell_Shadow_CurseOfAchimonde",
+	["Explosive Ammunition"] = "Spell_Fire_SelfDestruct",
+	["Ferocious Inspiration"] = "Ability_Hunter_BeastCall",
+	["Fortified"] = "Ability_Warrior_ShieldWall",
+	["Gnomish Goggles"] = "INV_Helmet_47",
+	["Gnomish Universal Remote"] = "INV_Misc_PocketWatch_01",
+	["Gold-sniffer"] = "INV_Misc_Coin_01",
+	["Hallowed Ground"] = "Spell_Holy_SealOfProtection",
+	["Hammer of the Righteous"] = "Spell_Holy_BlessingOfProtection",
+	["Heart of the Earthshaker"] = "INV_Jewelry_Necklace_AhnQiraj_02",
+	["Heavy Dark Iron Ring"] = "INV_Jewelry_Ring_14",
+	["Heavy Shield"] = "INV_Shield_05",
+	["Holy Concentration"] = "Spell_Holy_SpellWarding",
+	["Holy Guidance"] = "Spell_Holy_SealOfSalvation",
+	["Horde Officer's Tabard"] = "INV_Misc_TabardPVP_03",
+	["Horn of the Warchief"] = "INV_Misc_Horn_01",
+	["Improved Berserker Stance"] = "Ability_Racial_Avatar",
+	["Improved Consecration"] = "Spell_Holy_InnerFire",
+	["Improved Ice Barrier"] = "Spell_Ice_Lament",
+	["Improved Multi-Shot"] = "Ability_UpgradeMoonGlaive",
+	["Improved Shield Slam"] = "Ability_Warrior_ShieldBash",
+	["Improved Whirlwind"] = "Ability_Whirlwind",
+	["Insignia of the Horde"] = "INV_Jewelry_TrinketPVP_02",
+	["Keen Eye"] = "INV_Misc_Spyglass_02",
+	["Kill Shot"] = "INV_Weapon_Rifle_08",
+	["Killing Spree"] = "Ability_Rogue_Sprint",
+	["Lifegiving Gem"] = "INV_Misc_Gem_Pearl_05",
+	["Light's Grace"] = "Spell_Holy_SearingLight",
+	["Long Leash"] = "Ability_Hunter_BeastCall",
+	["Major Soulstone"] = "INV_Misc_Orb_04",
+	["Mark of Fordring"] = "INV_Jewelry_Talisman_07",
+	["Master Dragonslayer's Ring"] = "INV_Jewelry_Ring_41",
+	["Medallion of the Bladestorm"] = "INV_Jewelry_Necklace_30Naxxramas",
+	["Mortal Wounds"] = "Ability_Warrior_SavageBlow",
+	["Mutilate"] = "INV_Weapon_ShortBlade_05",
+	["Onyxia Blood Talisman"] = "Spell_Shadow_LifeDrain",
+	["Opening Hand"] = "INV_Misc_Book_09",
+	["Pact of the Annihilan"] = "Spell_Shadow_UnholyStrength",
+	["Pendant of the Plague"] = "INV_Jewelry_Necklace_18",
+	["Piercing Shots"] = "Ability_PierceDamage",
+	["Pristine Enchanted South Seas Kelp"] = "INV_Jewelry_Necklace_26",
+	["Protection"] = "Spell_Holy_DevotionAura",
+	["Purifying Power"] = "Spell_Holy_Purify",
+	["Quick Paws"] = "Ability_Hunter_Pet_Cat",
+	["Quick Strike Ring"] = "INV_Jewelry_Ring_07",
+	["Radiance"] = "Spell_Holy_HolyNova",
+	["Rapture"] = "Spell_Holy_PowerInfusion",
+	["Ring of Spell Power"] = "INV_Jewelry_Ring_38",
+	["Ring of the Devoured"] = "INV_Jewelry_Ring_AhnQiraj_05",
+	["Royal Seal of Eldre'Thalas"] = "INV_Jewelry_Talisman_10",
+	["Rune-hound"] = "INV_Misc_Rune_01",
+	["Sacred Duty"] = "Spell_Holy_DivineIntervention",
+	["Sanctified Light"] = "Spell_Holy_HealingFocus",
+	["Seal of the Damned"] = "INV_Jewelry_Ring_51Naxxramas",
+	["Second Thoughts"] = "Spell_Nature_TimeStop",
+	["Shadow Dance"] = "Spell_Shadow_LifeDrain",
+	["Shadow Embrace"] = "Spell_Shadow_AbominationExplosion",
+	["Shield Mastery"] = "Ability_Defend",
+	["Soul Devourer"] = "Spell_Shadow_SummonFelHunter",
+	["Spiritual Attunement"] = "Spell_Holy_BlessedRecovery",
+	["Star of Mystaria"] = "INV_Enchant_EssenceMagicLarge",
+	["Stormcaller's Amulet"] = "INV_Jewelry_Necklace_16",
+	["Summon Infernal"] = "Spell_Shadow_SummonInfernal",
+	["Tabard of the Horde"] = "INV_Misc_TabardPVP_01",
+	["Talisman of the Tempest"] = "INV_Jewelry_Necklace_AhnQiraj_04",
+	["Talvash's Enhancing Necklace"] = "INV_Jewelry_Necklace_02",
+	["The Art of War"] = "Spell_Holy_Excorcism_02",
+	["The Eternal Talisman"] = "INV_Jewelry_Necklace_19",
+	["The Reaper's Amulet"] = "INV_Jewelry_Necklace_28Naxxramas",
+	["Tiny Gordok"] = "INV_Crown_01",
+	["Titan"] = "Ability_Warrior_DefensiveStance",
+	["Toxic Bloom"] = "Spell_Nature_NullifyPoison",
+	["Trauma"] = "Ability_Warrior_DecisiveStrike",
+	["Tree of Life"] = "Spell_Nature_ResistNature",
+	["Veteran's Lessons"] = "INV_Misc_Book_11",
+	["Warsong Battle Tabard"] = "INV_Shirt_GuildTabard_01",
+	["Weighted Hammer"] = "Spell_Holy_SealOfMight",
+	["Wisp-herder"] = "Spell_Nature_WispSplode",
+	["Zul'Gurub Mask"] = "INV_Mask_02",
 }
 
 local function iconLookup(name)
@@ -956,6 +1068,19 @@ local function iconFor(name)
 	if fromItem then
 		return fromItem
 	end
+	-- "Pendant of the Plague: Moonfire" is an item's share of a spell.
+	-- The spell half is what the row is actually showing.
+	local _, _, left, right = string.find(name, "^(.-): (.+)$")
+	if left and right and left ~= "" and right ~= "" then
+		local spellTex = iconFor(right)
+		if spellTex ~= QUESTION then
+			return spellTex
+		end
+		local itemTex = iconFor(left)
+		if itemTex ~= QUESTION then
+			return itemTex
+		end
+	end
 	return QUESTION
 end
 
@@ -1029,7 +1154,17 @@ local function englishSpell(name)
 end
 
 -- The name this client uses. A French hero and a German hero each see their own wording.
-local function clientSpell(name)
+-- Global on purpose: the file is already at the 200 local-variable limit.
+function clientSpell(name)
+	local _, _, left, right = string.find(name, "^(.-): (.+)$")
+	if left and right and left ~= "" and right ~= "" then
+		local enFull = englishSpell(name)
+		local knownFull = (AZSSpellMeterIcon and (AZSSpellMeterIcon[name] or (enFull and AZSSpellMeterIcon[enFull])))
+			or EXTRA_ICONS[name] or (enFull and EXTRA_ICONS[enFull])
+		if not knownFull then
+			return clientSpell(left) .. ": " .. clientSpell(right)
+		end
+	end
 	local en = englishSpell(name)
 	local loc = "enUS"
 	if GetLocale then
@@ -1934,22 +2069,37 @@ local function rebuild(mode)
 					if not parent.procs then
 						parent.procs = {}
 					end
-					local slot = table.getn(parent.procs) + 1
 					local phits = 0
 					local pcrits = 0
 					if pi == 1 then
 						phits = row.hits or 0
 						pcrits = row.crits or 0
 					end
-					parent.procs[slot] = {
-						name = link.proc,
-						damage = partDmg,
-						dps = partRate,
-						kills = 0,
-						hits = phits,
-						crits = pcrits,
-						icon = row.iconPath,
-					}
+					-- The same talent can arrive under two languages. Keep one button.
+					local enProc = englishSpell(link.proc)
+					local have = nil
+					local ei
+					for ei = 1, table.getn(parent.procs) do
+						if englishSpell(parent.procs[ei].name) == enProc then
+							have = parent.procs[ei]
+						end
+					end
+					if have then
+						have.damage = (have.damage or 0) + partDmg
+						have.dps = (have.dps or 0) + partRate
+						have.hits = (have.hits or 0) + phits
+						have.crits = (have.crits or 0) + pcrits
+					else
+						parent.procs[table.getn(parent.procs) + 1] = {
+							name = link.proc,
+							damage = partDmg,
+							dps = partRate,
+							kills = 0,
+							hits = phits,
+							crits = pcrits,
+							icon = row.iconPath,
+						}
+					end
 				end
 			end
 			bucket[link.proc] = nil

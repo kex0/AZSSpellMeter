@@ -1,27 +1,21 @@
 # Changelog
 
-## 1.29
+## 1.30
 
 Tested with game 0.113.3.
 
 - Another hero's strongest spell is named in your language.
 - A spell keeps its icon when a co-op partner's game is in another language.
 - A talent groups under the spell it casts even when a partner's spell names are not in English.
+- The same talent no longer shows twice under one spell when a partner's game is in another language.
 - Hovering another hero's strongest spell shows what that spell does.
 - The tip for another hero's strongest spell does not include your own damage bonuses.
 - The tip for another hero's strongest spell does not say you have not learned that spell.
 - Divine Storm has an icon beside a hero's name.
-
-## 1.28
-
-Tested with game 0.113.1.
-
-- A spell keeps its icon when a co-op partner's game is in another language.
-- A talent groups under the spell it casts even when a partner's spell names are not in English.
-- Hovering another hero's strongest spell shows what that spell does.
-- The tip for another hero's strongest spell does not include your own damage bonuses.
-- The tip for another hero's strongest spell does not say you have not learned that spell.
-- Divine Storm has an icon beside a hero's name.
+- Imp, Felhunter, Succubus, and Pit Lord have icons beside a hero's name.
+- Choker of the Fire Lord has an icon beside a hero's name.
+- Pendant of the Plague: Moonfire shows Moonfire's icon.
+- A spell or item that was missing its picture now has one.
 
 ## 1.27
 
