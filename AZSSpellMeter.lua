@@ -878,6 +878,7 @@ local EXTRA_ICONS = {
 	["Infernal"] = "Spell_Shadow_SummonInfernal",
 	["Doomguard"] = "Spell_Shadow_SummonInfernal",
 	["Felguard"] = "Spell_Shadow_Metamorphosis",
+	["Divine Storm"] = "Spell_Holy_SealOfRighteousness",
 }
 
 local function iconLookup(name)
@@ -936,6 +937,13 @@ local function iconFor(name)
 	local tex = iconLookup(name)
 	if tex ~= QUESTION then
 		return tex
+	end
+	if AZSSpellMeterName and AZSSpellMeterName[name] and AZSSpellMeterName[name] ~= name then
+		name = AZSSpellMeterName[name]
+		tex = iconLookup(name)
+		if tex ~= QUESTION then
+			return tex
+		end
 	end
 	local casts = PROC_CAST[name]
 	if casts and casts[1] and casts[1] ~= name then
@@ -1011,19 +1019,35 @@ local function scanCarriedItems()
 	end
 end
 
+local spellSay = {}
+
+local function englishSpell(name)
+	if name and AZSSpellMeterName and AZSSpellMeterName[name] and AZSSpellMeterName[name] ~= "" then
+		return AZSSpellMeterName[name]
+	end
+	return name
+end
+
 local function castList(name)
-	local list = PROC_CAST[name]
+	local list = PROC_CAST[englishSpell(name)]
 	if not list or not list[1] then
 		return nil
 	end
 	local text = list[1]
+	if spellSay[text] then
+		text = spellSay[text]
+	end
 	local i
 	local n = table.getn(list)
 	for i = 2, n do
+		local part = list[i]
+		if spellSay[part] then
+			part = spellSay[part]
+		end
 		if i == n then
-			text = text .. " or " .. list[i]
+			text = text .. " or " .. part
 		else
-			text = text .. ", " .. list[i]
+			text = text .. ", " .. part
 		end
 	end
 	return text
@@ -1031,6 +1055,8 @@ end
 
 local scanTip
 local scanTipMissing
+local spellSlot = {}
+local spellTipCache = {}
 
 local function actionTip()
 	if scanTip or scanTipMissing then
@@ -1046,15 +1072,82 @@ local function actionTip()
 end
 
 local function scanIcons()
+	local wiped
+	for wiped in pairs(spellSlot) do
+		spellSlot[wiped] = nil
+	end
+	for wiped in pairs(spellTipCache) do
+		spellTipCache[wiped] = nil
+	end
+	for wiped in pairs(spellSay) do
+		spellSay[wiped] = nil
+	end
+	local function noteSlot(name, slot, overwrite)
+		if not name or name == "" then
+			return
+		end
+		if overwrite or not spellSlot[name] then
+			spellSlot[name] = slot
+		end
+		if AZSSpellMeterName then
+			local en = AZSSpellMeterName[name]
+			if en and en ~= name and (overwrite or not spellSlot[en]) then
+				spellSlot[en] = spellSlot[name]
+			end
+			if en and en ~= name and (overwrite or not spellSay[en]) then
+				spellSay[en] = name
+			end
+		end
+	end
 	if GetSpellName and GetSpellTexture then
+		local book = BOOKTYPE_SPELL or "spell"
 		local i = 1
 		while true do
-			local name = GetSpellName(i, BOOKTYPE_SPELL)
+			local name = GetSpellName(i, book)
 			if not name then
 				break
 			end
-			rememberIcon(name, GetSpellTexture(i, BOOKTYPE_SPELL))
+			noteSlot(name, { i, book }, true)
+			rememberIcon(name, GetSpellTexture(i, book))
 			i = i + 1
+		end
+		book = BOOKTYPE_PET or "pet"
+		i = 1
+		while true do
+			local name = GetSpellName(i, book)
+			if not name then
+				break
+			end
+			if not spellSlot[name] then
+				noteSlot(name, { i, book }, false)
+				rememberIcon(name, GetSpellTexture(i, book))
+			end
+			i = i + 1
+		end
+	end
+	if GetNumTalentTabs and GetNumTalents and GetTalentInfo then
+		local okTabs, tabs = pcall(GetNumTalentTabs)
+		local tab = 1
+		if okTabs and tabs and tabs > 0 then
+			while tab <= tabs do
+				local okN, n = pcall(GetNumTalents, tab)
+				local i = 1
+				if okN and n and n > 0 then
+					while i <= n do
+						local okInfo, name, icon = pcall(GetTalentInfo, tab, i)
+						if okInfo and name and name ~= "" then
+							if not spellSlot[name] then
+								noteSlot(name, { tab, i, "talent" }, false)
+							end
+							if icon and not icons[name] then
+								rememberIcon(name, icon)
+							end
+						end
+						i = i + 1
+					end
+				end
+				tab = tab + 1
+			end
 		end
 	end
 	scanCarriedItems()
@@ -1077,6 +1170,166 @@ local function scanIcons()
 	end
 	tip:Hide()
 	tip:SetAlpha(1)
+end
+
+-- Lines from the local hero's own build. A party spell should not show them.
+local function partyTipSkip(text)
+	if not text or text == "" then
+		return true
+	end
+	local skip = {
+		"Not learned yet",
+		"Jeszcze nieopanowane",
+		"Zatím nenaučeno",
+		"Noch nicht erlernt",
+		"Ainda não aprendido",
+		"Aún no aprendido",
+		"Pas encore appris",
+		"neînvățată",
+		"Henüz öğrenilmedi",
+		"не изучено",
+		"не вивчено",
+		"尚未学会",
+		"未習得",
+		"아직 배우지 않음",
+		"Your bonuses",
+		"Twoje premie",
+		"Tvé bonusy",
+		"Deine Boni",
+		"Seus bônus",
+		"Tus bonificaciones",
+		"Vos bonus",
+		"Bonusurile tale",
+		"Bonusların",
+		"Ваши бонусы",
+		"Ваші бонуси",
+		"你的加成",
+		"あなたのボーナス",
+		"보너스:",
+		"chance to crit",
+		"chance to cast",
+		"szansy na trafienie krytyczne",
+		"szansy na podwójne",
+		"šance na kritický zásah",
+		"šance seslat dvakrát",
+		"Chance auf kritischen Treffer",
+		"doppelt zu wirken",
+		"de chance de crítico",
+		"de chance de lançar duas vezes",
+		"probabilidad de crítico",
+		"probabilidad de lanzarse dos veces",
+		"chances de critique",
+		"chances de se lancer deux fois",
+		"șansă de critic",
+		"șansă de lansare dublă",
+		"hasarla kritik",
+		"iki kez kullanılır",
+		"шанс крита",
+		"шанс применить дважды",
+		"шансу на крит",
+		"шансу спрацювати двічі",
+		"几率暴击",
+		"几率施放两次",
+		"でクリティカル",
+		"2回発動",
+		"확률로 치명타",
+		"두 번 시전",
+	}
+	local i
+	for i = 1, table.getn(skip) do
+		if string.find(text, skip[i], 1, true) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Rank, cost, cast time, and what the spell does, from the game's own tooltip.
+-- Talents and spells this hero knows are read directly. A party spell in another
+-- language is matched back to that entry when the game has a translation for it.
+local function spellTipLines(name)
+	if not name or name == "" then
+		return nil
+	end
+	local cached = spellTipCache[name]
+	if cached then
+		return cached
+	end
+	local slot = spellSlot[name]
+	local key = name
+	if AZSSpellMeterName and AZSSpellMeterName[name] and AZSSpellMeterName[name] ~= "" then
+		key = AZSSpellMeterName[name]
+	end
+	if not slot then
+		slot = spellSlot[key]
+	end
+	if not slot then
+		local casts = PROC_CAST[key]
+		if casts and casts[1] and casts[1] ~= key then
+			slot = spellSlot[casts[1]]
+		end
+	end
+	if not slot then
+		return nil
+	end
+	local tip = actionTip()
+	if not tip then
+		return nil
+	end
+	tip:SetOwner(UIParent, "ANCHOR_NONE")
+	tip:SetAlpha(0)
+	local ok
+	if slot[3] == "talent" then
+		if not tip.SetTalent then
+			tip:Hide()
+			tip:SetAlpha(1)
+			return nil
+		end
+		ok = pcall(tip.SetTalent, tip, slot[1], slot[2])
+	else
+		if not tip.SetSpell then
+			tip:Hide()
+			tip:SetAlpha(1)
+			return nil
+		end
+		ok = pcall(tip.SetSpell, tip, slot[1], slot[2])
+	end
+	if not ok then
+		tip:Hide()
+		tip:SetAlpha(1)
+		return nil
+	end
+	local lines = {}
+	local i = 1
+	while i <= 12 do
+		local left = getglobal("AZSSpellMeterScanTipTextLeft" .. i)
+		local text = left and left:GetText()
+		if not text or text == "" then
+			break
+		end
+		local right = getglobal("AZSSpellMeterScanTipTextRight" .. i)
+		local side = right and right:GetText()
+		if i == 1 then
+			text = side
+		elseif side and side ~= "" then
+			text = text .. "  " .. side
+		end
+		if text and text ~= "" and not partyTipSkip(text) then
+			local r, g, b = 1, 1, 1
+			if left.GetTextColor then
+				r, g, b = left:GetTextColor()
+			end
+			lines[table.getn(lines) + 1] = { text, r or 1, g or 1, b or 1 }
+		end
+		i = i + 1
+	end
+	tip:Hide()
+	tip:SetAlpha(1)
+	if table.getn(lines) < 1 then
+		return nil
+	end
+	spellTipCache[name] = lines
+	return lines
 end
 
 local function queueScan()
@@ -1374,23 +1627,47 @@ end
 -- the parent, even before that spell has a row. Several spells share the proc
 -- across whichever of them are present.
 local function anchorSpells(procName, present)
-	local casts = PROC_CAST[procName]
+	local key = englishSpell(procName)
+	local casts = PROC_CAST[key]
+	local function shown(english)
+		if present[english] then
+			return english
+		end
+		local n
+		for n in pairs(present) do
+			if englishSpell(n) == english then
+				return n
+			end
+		end
+		if spellSay[english] then
+			return spellSay[english]
+		end
+		return nil
+	end
 	if not casts then
 		-- "Pendant of the Plague: Corruption" is that item's share of Corruption.
 		local _, _, spell = string.find(procName, ": (.+)$")
-		if spell and spell ~= "" and present[spell] then
-			return { spell }
+		if spell and spell ~= "" then
+			local hit = shown(englishSpell(spell))
+			if hit then
+				return { hit }
+			end
 		end
 		return nil
 	end
 	if table.getn(casts) == 1 then
-		return casts
+		local hit = shown(casts[1])
+		if not hit then
+			hit = casts[1]
+		end
+		return { hit }
 	end
 	local found = {}
 	local i
 	for i = 1, table.getn(casts) do
-		if present[casts[i]] then
-			found[table.getn(found) + 1] = casts[i]
+		local hit = shown(casts[i])
+		if hit and present[hit] then
+			found[table.getn(found) + 1] = hit
 		end
 	end
 	if not found[1] then
@@ -1595,7 +1872,7 @@ local function rebuild(mode)
 	local merges = {}
 	local procName, row
 	for procName, row in pairs(bucket) do
-		if mode ~= "party" and (row.proc or PROC_CAST[procName] or string.find(procName, ": ", 1, true)) then
+		if mode ~= "party" and (row.proc or PROC_CAST[englishSpell(procName)] or string.find(procName, ": ", 1, true)) then
 			local parents = anchorSpells(procName, bucket)
 			if parents and not (table.getn(parents) == 1 and parents[1] == procName) then
 				local mi = table.getn(merges) + 1
@@ -2540,10 +2817,11 @@ local function refreshWindow(win)
 				local btn = row.procBtns and row.procBtns[pi]
 				local info = nil
 				if not data.child and pi == 1 and data.classKey and data.top and data.top ~= "" then
-					local tex = iconFor(data.top)
+					local topName = englishSpell(data.top)
+					local tex = iconFor(topName)
 					if tex and not string.find(string.lower(tex), "questionmark", 1, true) then
 						info = {
-							name = data.top,
+							name = topName,
 							dps = data.topdps or 0,
 							icon = tex,
 							topSpell = true,
@@ -3132,11 +3410,11 @@ local function paintTip(title, icon, lines)
 	if lines then
 		count = table.getn(lines)
 	end
-	if count > 8 then
-		count = 8
+	if count > 12 then
+		count = 12
 	end
 	local i
-	for i = 1, 8 do
+	for i = 1, 12 do
 		local fs = tip.lines[i]
 		if i <= count then
 			local line = lines[i]
@@ -3524,7 +3802,7 @@ local function createRow(parent, index)
 				table.insert(lines, { string.format("%d hits, %d crits, %s crit", landed, crits, fmtPct(crits / landed)), 1, 0.82, 0.55 })
 			end
 			if data.top and data.top ~= "" then
-				local topLine = "Most from " .. data.top
+				local topLine = "Most from " .. englishSpell(data.top)
 				if data.topdps and data.topdps > 0 then
 					topLine = topLine .. ", " .. fmtRate(data.topdps) .. " dps"
 				end
@@ -3592,8 +3870,18 @@ local function createRow(parent, index)
 				if info.topSpell then
 					lines = {
 						{ string.format("%s %s", rateWord, fmtRate(info.dps or 0)), 0.7, 0.92, 0.68 },
-						{ "Their highest damage spell.", 0.75, 0.85, 1 },
 					}
+					local extra = spellTipLines(info.name)
+					if extra then
+						local ei
+						for ei = 1, table.getn(extra) do
+							if table.getn(lines) < 12 then
+								lines[table.getn(lines) + 1] = extra[ei]
+							end
+						end
+					else
+						table.insert(lines, { "Their highest damage spell.", 0.75, 0.85, 1 })
+					end
 				else
 					local share = 0
 					if total > 0 then
@@ -5681,7 +5969,7 @@ local function buildMainList()
 	tip.title = tipTitle
 	tip.lines = {}
 	local li
-	for li = 1, 8 do
+	for li = 1, 12 do
 		local fs = tip:CreateFontString(nil, "OVERLAY")
 		fs:SetJustifyH("LEFT")
 		face(fs, 11)
