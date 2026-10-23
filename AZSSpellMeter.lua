@@ -1028,6 +1028,29 @@ local function englishSpell(name)
 	return name
 end
 
+-- The name this client uses. A French hero and a German hero each see their own wording.
+local function clientSpell(name)
+	local en = englishSpell(name)
+	local loc = "enUS"
+	if GetLocale then
+		loc = GetLocale() or loc
+	end
+	if loc == "enGB" then
+		loc = "enUS"
+	end
+	if loc ~= "enUS" then
+		local pack = AZSSpellMeterLocale and AZSSpellMeterLocale[loc]
+		if pack and en and pack[en] and pack[en] ~= "" then
+			return pack[en]
+		end
+		if spellSay[en] then
+			return spellSay[en]
+		end
+		return name
+	end
+	return en
+end
+
 local function castList(name)
 	local list = PROC_CAST[englishSpell(name)]
 	if not list or not list[1] then
@@ -2817,8 +2840,8 @@ local function refreshWindow(win)
 				local btn = row.procBtns and row.procBtns[pi]
 				local info = nil
 				if not data.child and pi == 1 and data.classKey and data.top and data.top ~= "" then
-					local topName = englishSpell(data.top)
-					local tex = iconFor(topName)
+					local topName = clientSpell(data.top)
+					local tex = iconFor(data.top)
 					if tex and not string.find(string.lower(tex), "questionmark", 1, true) then
 						info = {
 							name = topName,
@@ -3802,7 +3825,7 @@ local function createRow(parent, index)
 				table.insert(lines, { string.format("%d hits, %d crits, %s crit", landed, crits, fmtPct(crits / landed)), 1, 0.82, 0.55 })
 			end
 			if data.top and data.top ~= "" then
-				local topLine = "Most from " .. englishSpell(data.top)
+				local topLine = "Most from " .. clientSpell(data.top)
 				if data.topdps and data.topdps > 0 then
 					topLine = topLine .. ", " .. fmtRate(data.topdps) .. " dps"
 				end

@@ -1,16 +1,27 @@
 # Changelog
 
+## 1.29
+
+Tested with game 0.113.3.
+
+- Another hero's strongest spell is named in your language.
+- A spell keeps its icon when a co-op partner's game is in another language.
+- A talent groups under the spell it casts even when a partner's spell names are not in English.
+- Hovering another hero's strongest spell shows what that spell does.
+- The tip for another hero's strongest spell does not include your own damage bonuses.
+- The tip for another hero's strongest spell does not say you have not learned that spell.
+- Divine Storm has an icon beside a hero's name.
+
 ## 1.28
 
 Tested with game 0.113.1.
 
-- Spell icons show when a co-op partner plays in another language.
-- Talents still group under the spell they cast when the names are not in English.
-- Hover a party member's strongest spell to see what it does.
-- That tip leaves out your own bonuses.
-- It also leaves out a spell you have not learned yet.
-- Each hero's strongest spell is named in English.
-- Divine Storm has an icon.
+- A spell keeps its icon when a co-op partner's game is in another language.
+- A talent groups under the spell it casts even when a partner's spell names are not in English.
+- Hovering another hero's strongest spell shows what that spell does.
+- The tip for another hero's strongest spell does not include your own damage bonuses.
+- The tip for another hero's strongest spell does not say you have not learned that spell.
+- Divine Storm has an icon beside a hero's name.
 
 ## 1.27
 
