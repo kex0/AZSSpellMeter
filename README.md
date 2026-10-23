@@ -26,9 +26,9 @@ Requires Azeroth Survivors 0.87 or newer, for `AZS_GetMeter`. Healing, Boss, and
 
 Drag the title bar, or the damage and DPS numbers, to move the window. Drag the corner to resize it. If the list is longer than the window, the last spell sits partly in view. Scroll with the mouse wheel.
 
-Damage, Healing, Boss, and Taken are the buttons under the title. Damage includes kills per spell. Healing is health actually restored. Boss is the last boss fight, and it stays up until the next boss. Taken is the damage you took, split by what hit you. DPS looks back 10 seconds unless you change that in settings. A thin bar under a spell icon is its cooldown. Hover the total for your build stats.
+Damage, Healing, Boss, Taken, and Party are the buttons under the title. Damage includes kills per spell. Healing is health actually restored. Boss is the last boss fight, and it stays up until the next boss. Taken is the damage you took, split by what hit you. Party shows each hero's damage, and only while you are in co-op. DPS looks back 10 seconds unless you change that in settings. A thin bar under a spell icon is its cooldown. Hover a spell for its hits and crits. Hover the total for your build stats.
 
-The gear on the title bar opens settings: scale, opacity, background, the DPS window, colors, cooldown bars, and lock. Since the start there uses the average for the whole run, or the whole boss fight. Right-click the bubble for the same window. Reset settings there puts those back. Your numbers and window positions stay.
+The gear on the title bar opens settings: scale, opacity, background, the DPS window, columns, colors, cooldown bars, and lock. Share is that spell's part of the total. Under the spell adds an arrow that lists the talents grouped into a spell. Wrap names splits a long name onto a second line, and it is off until you turn it on. Since the start there uses the average for the whole run, or the whole boss fight. Right-click the bubble for the same window. Reset settings there puts those back. Your numbers and window positions stay.
 
 Right-click a button to open that view in its own window. The button stays, dimmed. Click it, or the x on the extra window, to bring the view back. Each view is only in one place. The extra window has its own size, position, and Reset.
 
@@ -45,6 +45,25 @@ While the main window, its bubble, or an extra window is open, the built-in Dama
 The window position is remembered across updates. Deleting the addon folder does not clear it. If the window is missing, type `/azsm resetpos`.
 
 ## Changelog
+
+### 1.27
+
+Tested with game 0.113.1.
+
+- Share shows each spell's part of the total.
+- Kills, Damage, Share, and DPS can each be hidden.
+- Under the spell adds an arrow that opens the talents grouped into a spell.
+- Sweeping Strikes shows on Cleave, Mortal Strike, and Execute.
+- An item that adds to a spell is grouped into that spell.
+- A pet's attacks use the pet's name.
+- Infernal, Doomguard, and Felguard have icons.
+- Hover a spell to see its hits, crits, and crit chance.
+- Columns widen just enough for a long number, and they stop shifting as DPS changes.
+- Wrap names splits a long name onto a second line. It is off until you turn it on.
+- An item's icon stays after a reload, once the meter has seen it.
+- Party shows each hero's damage while you are in co-op.
+- The Party tab is hidden when you play alone.
+- Each hero's strongest spell sits beside their name.
 
 ### 1.26
 

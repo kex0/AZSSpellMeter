@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: AZS Spell Meter
-## Notes: Per-spell damage, healing, boss damage, and damage taken. Each view can open in its own window.
+## Notes: Per-spell damage, healing, boss damage, damage taken, and party damage. Each view can open in its own window.
 ## SavedVariables: AZSSpellMeterDB
-## Version: 1.26
+## Version: 1.27
 
 Icons.lua
 AZSSpellMeter.lua

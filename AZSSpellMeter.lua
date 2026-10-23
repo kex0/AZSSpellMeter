@@ -19,14 +19,16 @@ local K = {
 	MAX_ROWS = 24,
 	ROW_POOL = 25,
 	ROW_H = 16,
+	WRAP_H = 24,
 	SOLID = "Interface\\Buttons\\WHITE8X8",
-	WIDTH = 348,
+	WIDTH = 394,
 	MODE_H = 16,
 	COL_H = 12,
 	HEADER = 51,
 	BOTTOM = 8,
 	COL_KILL = 40,
 	COL_DMG = 50,
+	COL_PCT = 40,
 	COL_DPS = 36,
 	DETACH_H = 35,
 	CLASS_SHEET = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes",
@@ -75,12 +77,14 @@ local VIEW_TITLE = {
 	healing = "Healing",
 	boss = "Boss",
 	taken = "Taken",
+	party = "Party",
 }
 local HEADER_TINT = {
 	damage = { 0.42, 0.24, 0.06, 0.90, 0.66, 0.22 },
 	healing = { 0.10, 0.28, 0.14, 0.45, 0.78, 0.40 },
 	boss = { 0.40, 0.16, 0.06, 0.90, 0.45, 0.16 },
 	taken = { 0.36, 0.12, 0.10, 0.85, 0.35, 0.28 },
+	party = { 0.12, 0.18, 0.36, 0.45, 0.62, 0.95 },
 }
 local LOOK = {
 	scale = 1,
@@ -91,6 +95,7 @@ local LOOK = {
 	healing = { 0.45, 0.78, 0.40, 1 },
 	boss = { 0.90, 0.45, 0.16, 1 },
 	taken = { 0.85, 0.35, 0.28, 1 },
+	party = { 0.45, 0.62, 0.95, 1 },
 }
 local settings
 
@@ -178,6 +183,14 @@ local function loadState()
 	end
 	state.total = state.total or 0
 	state.kills = state.kills or 0
+	if cfg.learned then
+		local learnedName, learnedPath
+		for learnedName, learnedPath in pairs(cfg.learned) do
+			if learnedPath and learnedPath ~= "" and not icons[learnedName] then
+				icons[learnedName] = learnedPath
+			end
+		end
+	end
 	local spellName, row
 	for spellName, row in pairs(state.spells) do
 		row.kills = row.kills or 0
@@ -278,31 +291,6 @@ local function castsPaused()
 	return lastCast and (GetTime() - lastCast) >= castLimit()
 end
 
-local function noteCast()
-	local now = GetTime()
-	if lastCast then
-		local dt = now - lastCast
-		-- A short resume is a slow cast, not a menu. Put that gap back.
-		-- A long resume is the run starting again after ESC, a cache, or a level-up.
-		if castHeld and dt >= 0.05 and dt <= 2.5 and not choiceHold and not dead and not menuShown() then
-			if state then
-				state.elapsed = (state.elapsed or 0) + dt
-			end
-			rememberGap(dt)
-		elseif not castHeld and dt >= 0.05 then
-			local learnCap = castLimit()
-			if table.getn(castGaps) < 3 then
-				learnCap = 6
-			end
-			if dt <= learnCap then
-				rememberGap(dt)
-			end
-		end
-	end
-	castHeld = false
-	lastCast = now
-end
-
 local function freezeAt(t)
 	if not state or not state.anchor or not t then
 		return
@@ -352,19 +340,6 @@ local function endChoice()
 	choiceHold = false
 	holdX, holdY = nil, nil
 	syncClock()
-end
-
-local function pollChoiceMove()
-	if not choiceHold or GetTime() <= choiceGrace or not holdX or not GetPlayerMapPosition then
-		return
-	end
-	local x, y = GetPlayerMapPosition("player")
-	if not x or (x == 0 and y == 0) then
-		return
-	end
-	if math.abs(x - holdX) > 0.0008 or math.abs(y - holdY) > 0.0008 then
-		endChoice()
-	end
 end
 
 local function choiceMessage(msg)
@@ -435,7 +410,10 @@ end
 
 -- English 1.12 combat-log lines. School, block, and resist suffixes sit
 -- after the number, so the first integer is the damage dealt.
-local function parseYours(msg)
+local ingest
+local noteKill
+do
+	local function parseYours(msg)
 	local _, _, spell, victim, amount
 	_, _, spell, victim, amount = string.find(msg, "^Your (.+) crits (.+) for (%d+)")
 	if spell then
@@ -483,6 +461,18 @@ local function parsePeriodic(msg)
 	return nil
 end
 
+local function petAttacker(name)
+	name = cleanName(name)
+	if not name then
+		return "Pet"
+	end
+	name = string.gsub(name, "^Your ", "")
+	if name == "pet" then
+		return "Pet"
+	end
+	return name
+end
+
 local function parsePet(msg, melee)
 	local _, _, spell, victim, amount = string.find(msg, "^.+'s (.+) crits (.+) for (%d+)")
 	if spell then
@@ -500,11 +490,11 @@ local function parsePet(msg, melee)
 		local attacker
 		_, _, attacker, victim, amount = string.find(msg, "^(.+) crits (.+) for (%d+)")
 		if amount and not string.find(attacker or "", "'s$") then
-			return "Pet", amount, true, cleanName(victim)
+			return petAttacker(attacker), amount, true, cleanName(victim)
 		end
 		_, _, attacker, victim, amount = string.find(msg, "^(.+) hits (.+) for (%d+)")
 		if amount and not string.find(attacker or "", "'s$") then
-			return "Pet", amount, false, cleanName(victim)
+			return petAttacker(attacker), amount, false, cleanName(victim)
 		end
 	end
 	return nil
@@ -518,10 +508,37 @@ local function note(spell, amount, crit, victim)
 	end
 	lastBlow[victim] = spell
 	lastHit = spell
+	local row = state.spells[spell]
+	if not row then
+		row = { damage = 0, hits = 0, crits = 0, kills = 0 }
+		state.spells[spell] = row
+	end
+	row.hits = (row.hits or 0) + 1
+	if crit then
+		row.crits = (row.crits or 0) + 1
+	end
 	return true
-end
+	end
 
-local function noteKill(name)
+	ingest = function(msg, kind)
+		msg = strip(msg)
+		lastRaw = msg
+		local spell, amount, crit, victim
+		if kind == "yours" then
+			spell, amount, crit, victim = parseYours(msg)
+		elseif kind == "periodic" then
+			spell, amount, crit, victim = parsePeriodic(msg)
+		elseif kind == "pet" then
+			spell, amount, crit, victim = parsePet(msg, false)
+		elseif kind == "petmelee" then
+			spell, amount, crit, victim = parsePet(msg, true)
+		end
+		if spell then
+			note(spell, amount, crit, victim)
+		end
+	end
+
+	noteKill = function(name)
 	name = cleanName(name)
 	if not name or name == "" or name == "You" or not state then
 		return
@@ -541,23 +558,6 @@ local function noteKill(name)
 	end
 	row.kills = (row.kills or 0) + 1
 	state.kills = (state.kills or 0) + 1
-end
-
-local function ingest(msg, kind)
-	msg = strip(msg)
-	lastRaw = msg
-	local spell, amount, crit, victim
-	if kind == "yours" then
-		spell, amount, crit, victim = parseYours(msg)
-	elseif kind == "periodic" then
-		spell, amount, crit, victim = parsePeriodic(msg)
-	elseif kind == "pet" then
-		spell, amount, crit, victim = parsePet(msg, false)
-	elseif kind == "petmelee" then
-		spell, amount, crit, victim = parsePet(msg, true)
-	end
-	if spell then
-		note(spell, amount, crit, victim)
 	end
 end
 
@@ -657,11 +657,63 @@ local function recentRate(mode, now, total, bucket)
 	return header / span
 end
 
+local colHold = {}
+
+local function clearColHold(mode)
+	local win, held
+	for win, held in pairs(colHold) do
+		if mode then
+			held[mode] = nil
+		else
+			colHold[win] = nil
+		end
+	end
+end
+
+-- A column grows as soon as a number needs it. It shrinks only after the
+-- narrower width has been enough for 10 seconds, or when a reset clears it.
+local function holdWidth(win, mode, key, needed, now)
+	if not mode then
+		mode = "damage"
+	end
+	local byWin = colHold[win]
+	if not byWin then
+		byWin = {}
+		colHold[win] = byWin
+	end
+	local byMode = byWin[mode]
+	if not byMode then
+		byMode = {}
+		byWin[mode] = byMode
+	end
+	local slot = byMode[key]
+	if not slot then
+		slot = { w = needed }
+		byMode[key] = slot
+		return needed
+	end
+	if needed > slot.w + 1 then
+		slot.w = needed
+		slot.since = nil
+	elseif needed < slot.w - 1 then
+		if not slot.since then
+			slot.since = now
+		elseif now - slot.since >= 10 then
+			slot.w = needed
+			slot.since = nil
+		end
+	else
+		slot.since = nil
+	end
+	return slot.w
+end
+
 local function resetData()
 	if not state then
 		loadState()
 	end
 	clearRecentRate()
+	clearColHold()
 	state.spells = {}
 	state.total = 0
 	state.kills = 0
@@ -679,6 +731,9 @@ local function resetData()
 	state.takenBase = nil
 	state.takenBaseTotal = nil
 	state.takenBaseTime = nil
+	state.partyBase = nil
+	state.partyBaseTotal = nil
+	state.partyBaseTime = nil
 	local level = UnitLevel("player")
 	if level and level > 0 then
 		state.level = level
@@ -748,6 +803,16 @@ local function rememberIcon(name, texture)
 	end
 end
 
+local function usableIcon(path)
+	if not path or path == "" then
+		return nil
+	end
+	if string.find(string.lower(path), "questionmark", 1, true) then
+		return nil
+	end
+	return path
+end
+
 local FALLBACK_ICONS = {
 	Melee = "Interface\\Icons\\INV_Sword_04",
 	["Damage Shield"] = "Interface\\Icons\\Spell_Nature_Thorns",
@@ -797,6 +862,7 @@ local PROC_CAST = {
 	["Starfall"] = { "Starfire" },
 	["Leader of the Pack"] = { "Swipe" },
 	["Nature's Grasp"] = { "Entangling Roots" },
+	["Sweeping Strikes"] = { "Cleave", "Mortal Strike", "Execute" },
 }
 
 -- Custom talents are not in Spell.dbc, so the generated icon list has no row for them.
@@ -809,6 +875,9 @@ local EXTRA_ICONS = {
 	["Maelstrom Weapon"] = "Spell_Nature_Lightning",
 	["Leech"] = "Spell_Shadow_LifeDrain",
 	["Onyxia Tooth Pendant"] = "INV_Jewelry_Necklace_09",
+	["Infernal"] = "Spell_Shadow_SummonInfernal",
+	["Doomguard"] = "Spell_Shadow_SummonInfernal",
+	["Felguard"] = "Spell_Shadow_Metamorphosis",
 }
 
 local function iconLookup(name)
@@ -831,18 +900,34 @@ local function iconLookup(name)
 	return QUESTION
 end
 
-local itemMiss = {}
-
-local function itemIcon(name)
-	if not name or name == "" or itemMiss[name] or not GetItemInfo then
+local function keepIcon(name, texture)
+	local path = usableIcon(asTexture(texture) or texture)
+	if not path or not name or name == "" then
 		return nil
 	end
-	itemMiss[name] = true
+	if (AZSSpellMeterIcon and AZSSpellMeterIcon[name]) or EXTRA_ICONS[name] or FALLBACK_ICONS[name] then
+		return nil
+	end
+	icons[name] = path
+	local cfg = config()
+	if not cfg.learned then
+		cfg.learned = {}
+	end
+	cfg.learned[name] = path
+	return path
+end
+
+local function itemIcon(name)
+	if not name or name == "" or not GetItemInfo then
+		return nil
+	end
+	if icons[name] then
+		return icons[name]
+	end
 	local _, _, _, _, _, _, _, _, ninth, tenth = GetItemInfo(name)
 	local path = asTexture(tenth) or asTexture(ninth)
 	if path then
-		icons[name] = path
-		return path
+		return keepIcon(name, path) or path
 	end
 	return nil
 end
@@ -867,8 +952,9 @@ local function iconFor(name)
 end
 
 local function rowIcon(data)
-	if data and data.iconPath and data.iconPath ~= "" then
-		return data.iconPath
+	local path = usableIcon(data and data.iconPath)
+	if path then
+		return path
 	end
 	return iconFor(data and data.name)
 end
@@ -890,14 +976,13 @@ local function noteItemText(msg)
 			path = asTexture(tenth) or asTexture(ninth)
 		end
 		if path and shown and shown ~= "" then
-			icons[shown] = path
+			keepIcon(shown, path)
 		end
 		start = e + 1
 	end
 end
 
 local function scanCarriedItems()
-	itemMiss = {}
 	if GetInventoryItemLink and GetInventoryItemTexture then
 		local slot
 		for slot = 1, 19 do
@@ -905,7 +990,7 @@ local function scanCarriedItems()
 			local tex = GetInventoryItemTexture("player", slot)
 			if link and tex then
 				local _, _, name = string.find(link, "%[(.+)%]")
-				rememberIcon(name, tex)
+				keepIcon(name, tex)
 			end
 		end
 	end
@@ -919,7 +1004,7 @@ local function scanCarriedItems()
 				local tex = GetContainerItemInfo(bag, slot)
 				if link and tex then
 					local _, _, name = string.find(link, "%[(.+)%]")
-					rememberIcon(name, tex)
+					keepIcon(name, tex)
 				end
 			end
 		end
@@ -1017,19 +1102,6 @@ local function widenCombatLog()
 	end
 end
 
-local function visibleRows()
-	if not frame then
-		return 8
-	end
-	local n = math.floor((frame:GetHeight() - K.HEADER - K.BOTTOM) / K.ROW_H + 0.001)
-	if n < 1 then
-		n = 1
-	elseif n > K.MAX_ROWS then
-		n = K.MAX_ROWS
-	end
-	return n
-end
-
 local function rowWidth(win)
 	if not win then
 		win = frame
@@ -1074,7 +1146,7 @@ local function watchRun()
 	if not t then
 		return
 	end
-	if runSeen and t + 1 < runSeen and ((state.kills or 0) > 0 or state.base or state.healBase or state.bossBase or state.takenBase) then
+	if runSeen and t + 1 < runSeen and ((state.kills or 0) > 0 or state.base or state.healBase or state.bossBase or state.takenBase or state.partyBase) then
 		state.spells = {}
 		state.kills = 0
 		lastBlow = {}
@@ -1090,6 +1162,10 @@ local function watchRun()
 		state.takenBase = nil
 		state.takenBaseTotal = nil
 		state.takenBaseTime = nil
+		state.partyBase = nil
+		state.partyBaseTotal = nil
+		state.partyBaseTime = nil
+		clearColHold()
 		say("New run.")
 	end
 	runSeen = t
@@ -1131,13 +1207,27 @@ local function meterFrom(list)
 	return list, total, dps
 end
 
+local function inParty()
+	local rev = AZS_REVIVE
+	if rev and rev.down ~= nil then
+		return true
+	end
+	if AZS_PARTY and table.getn(AZS_PARTY) > 0 then
+		return true
+	end
+	return false
+end
+
 local function viewMode()
 	local cfg = config()
 	if not cfg.viewChosen then
 		cfg.view = "damage"
 	end
 	local v = cfg.view
-	if v ~= "healing" and v ~= "boss" and v ~= "taken" then
+	if v == "party" and not inParty() then
+		return "damage"
+	end
+	if v ~= "healing" and v ~= "boss" and v ~= "taken" and v ~= "party" then
 		return "damage"
 	end
 	return v
@@ -1159,6 +1249,8 @@ local function meterWords(mode)
 		return "Healing", "HPS", false
 	elseif mode == "taken" then
 		return "Taken", "DPS", false
+	elseif mode == "party" then
+		return "Damage", "DPS", false
 	end
 	return "Damage", "DPS", mode == "damage"
 end
@@ -1173,6 +1265,8 @@ local function baseFields(mode)
 		return "bossBase", "bossBaseTotal", "bossBaseTime"
 	elseif mode == "taken" then
 		return "takenBase", "takenBaseTotal", "takenBaseTime"
+	elseif mode == "party" then
+		return "partyBase", "partyBaseTotal", "partyBaseTime"
 	end
 	return "base", "baseTotal", "baseTime"
 end
@@ -1189,6 +1283,8 @@ local function pullMeter(mode)
 		fn = AZS_GetHealing
 	elseif mode == "boss" then
 		fn = AZS_GetBossMeter
+	elseif mode == "party" then
+		fn = AZS_GetPartyMeter
 	elseif mode == "taken" then
 		local lines = {}
 		local total = 0
@@ -1260,6 +1356,7 @@ local function windowReset(dropTest, mode)
 	end
 	captureBase(mode)
 	clearRecentRate(mode)
+	clearColHold(mode)
 	if showsKills(mode) then
 		state.spells = {}
 		state.kills = 0
@@ -1279,6 +1376,11 @@ end
 local function anchorSpells(procName, present)
 	local casts = PROC_CAST[procName]
 	if not casts then
+		-- "Pendant of the Plague: Corruption" is that item's share of Corruption.
+		local _, _, spell = string.find(procName, ": (.+)$")
+		if spell and spell ~= "" and present[spell] then
+			return { spell }
+		end
 		return nil
 	end
 	if table.getn(casts) == 1 then
@@ -1295,6 +1397,40 @@ local function anchorSpells(procName, present)
 		return nil
 	end
 	return found
+end
+
+local function columnOn(key)
+	local saved = config().look
+	if not saved then
+		return true
+	end
+	if key == "kills" then
+		return saved.colKill ~= false
+	elseif key == "damage" then
+		return saved.colDmg ~= false
+	elseif key == "dps" then
+		return saved.colDps ~= false
+	elseif key == "share" then
+		return saved.colShare ~= false
+	end
+	return true
+end
+
+local function activeSort(mode)
+	local key = config().sort or "damage"
+	if key == "name" or (key == "kills" and not showsKills(mode)) or not columnOn(key) then
+		key = "damage"
+	end
+	if not columnOn(key) then
+		if columnOn("dps") then
+			key = "dps"
+		elseif columnOn("share") then
+			key = "share"
+		elseif showsKills(mode) and columnOn("kills") then
+			key = "kills"
+		end
+	end
+	return key
 end
 
 local function rebuild(mode)
@@ -1341,9 +1477,13 @@ local function rebuild(mode)
 			return row
 		end
 		local kills = 0
+		local hits = 0
+		local crits = 0
 		local rec = state.spells[name]
 		if rec then
 			kills = rec.kills or 0
+			hits = rec.hits or 0
+			crits = rec.crits or 0
 		end
 		row = {
 			name = name,
@@ -1351,6 +1491,8 @@ local function rebuild(mode)
 			dps = 0,
 			proc = false,
 			kills = kills,
+			hits = hits,
+			crits = crits,
 			fromMeter = false,
 		}
 		bucket[name] = row
@@ -1376,7 +1518,17 @@ local function rebuild(mode)
 				row.damage = dealt
 				row.proc = isProc(line.proc)
 				row.fromMeter = true
-				row.iconPath = line.icon
+				row.iconPath = usableIcon(line.icon)
+				if line.class and line.class ~= "" then
+					row.classKey = string.lower(line.class)
+				end
+				if line.top and line.top ~= "" then
+					row.top = line.top
+					row.topdps = tonumber(line.topdps) or 0
+				end
+				if row.iconPath then
+					keepIcon(name, row.iconPath)
+				end
 			end
 		end
 	end
@@ -1443,7 +1595,7 @@ local function rebuild(mode)
 	local merges = {}
 	local procName, row
 	for procName, row in pairs(bucket) do
-		if row.proc or PROC_CAST[procName] then
+		if mode ~= "party" and (row.proc or PROC_CAST[procName] or string.find(procName, ": ", 1, true)) then
 			local parents = anchorSpells(procName, bucket)
 			if parents and not (table.getn(parents) == 1 and parents[1] == procName) then
 				local mi = table.getn(merges) + 1
@@ -1483,11 +1635,20 @@ local function rebuild(mode)
 						parent.procs = {}
 					end
 					local slot = table.getn(parent.procs) + 1
+					local phits = 0
+					local pcrits = 0
+					if pi == 1 then
+						phits = row.hits or 0
+						pcrits = row.crits or 0
+					end
 					parent.procs[slot] = {
 						name = link.proc,
 						damage = partDmg,
 						dps = partRate,
 						kills = 0,
+						hits = phits,
+						crits = pcrits,
+						icon = row.iconPath,
 					}
 				end
 			end
@@ -1512,10 +1673,7 @@ local function rebuild(mode)
 			sorted[n] = entry
 		end
 	end
-	local key = config().sort or "damage"
-	if key == "name" or key == "share" or (key == "kills" and not showsKills(mode)) then
-		key = "damage"
-	end
+	local key = activeSort(mode)
 	local desc = config().sortDir ~= "asc"
 	table.sort(sorted, function(a, b)
 		local av = a.damage or 0
@@ -1540,6 +1698,49 @@ local function rebuild(mode)
 		end
 		return av < bv
 	end)
+	local ri
+	for ri = 1, n do
+		sorted[ri].rank = ri
+	end
+	local saved = config().look
+	if saved and saved.detail then
+		local open = config().open
+		if open then
+			local built = {}
+			local bn = 0
+			for ri = 1, n do
+				local entry = sorted[ri]
+				bn = bn + 1
+				built[bn] = entry
+				if open[entry.name] and entry.procs and entry.procs[1] then
+					local pi
+					for pi = 1, table.getn(entry.procs) do
+						local p = entry.procs[pi]
+						bn = bn + 1
+						built[bn] = {
+							name = p.name,
+							damage = p.damage or 0,
+							dps = p.dps or 0,
+							kills = 0,
+							hits = p.hits or 0,
+							crits = p.crits or 0,
+							iconPath = p.icon,
+							child = true,
+							proc = true,
+							parentName = entry.name,
+						}
+					end
+				end
+			end
+			for ri = 1, n do
+				sorted[ri] = nil
+			end
+			for ri = 1, bn do
+				sorted[ri] = built[ri]
+			end
+			n = bn
+		end
+	end
 	return n
 end
 
@@ -1689,6 +1890,12 @@ local function refreshWindow(win)
 				else
 					empty = "Damage taken needs a newer game build."
 				end
+			elseif mode == "party" then
+				if AZS_GetPartyMeter then
+					empty = "No party damage yet."
+				else
+					empty = "Party damage needs a newer game build."
+				end
 			end
 			win.emptyText:SetText(empty)
 			win.emptyText:ClearAllPoints()
@@ -1718,6 +1925,8 @@ local function refreshWindow(win)
 		end
 		if win.fixed then
 			title = VIEW_TITLE[win.fixed] or title
+		elseif mode == "party" then
+			title = "Party"
 		elseif className ~= "" then
 			title = className
 		end
@@ -1770,29 +1979,133 @@ local function refreshWindow(win)
 		end
 		win.dpsBtn:SetWidth(dw + 8)
 	end
+	local showKill = killView and columnOn("kills")
+	local showDmg = columnOn("damage")
+	local showRate = columnOn("dps")
+	local showShare = columnOn("share")
+	local detail = config().look and config().look.detail
 	if win.sortBtns then
-		local active = config().sort or "damage"
-		if active == "name" or active == "share" or (active == "kills" and not killView) then
-			active = "damage"
-		end
+		local active = activeSort(win.fixed)
 		if win.dmgCol then
 			win.dmgCol.base = amountWord
-			if mode == "healing" then
-				win.dmgCol:SetWidth(58)
-			else
-				win.dmgCol:SetWidth(K.COL_DMG)
-			end
 		end
 		if win.dpsCol then
 			win.dpsCol.base = rateWord
 		end
-		if win.killCol then
-			if killView then
-				win.killCol:Show()
+		if win.shareCol then
+			win.shareCol.base = "%"
+		end
+		local prevCol = nil
+		local function stickCol(btn, on, width)
+			if not btn then
+				return
+			end
+			if not on then
+				btn:Hide()
+				return
+			end
+			btn:Show()
+			btn:SetWidth(width)
+			btn:ClearAllPoints()
+			if not prevCol then
+				btn:SetPoint("RIGHT", win.cols, "RIGHT", -2, 0)
 			else
-				win.killCol:Hide()
+				btn:SetPoint("RIGHT", prevCol, "LEFT", -6, 0)
+			end
+			prevCol = btn
+		end
+		local rateW = K.COL_DPS
+		local shareW = K.COL_PCT
+		local dmgW = K.COL_DMG
+		if mode == "healing" then
+			dmgW = 58
+		end
+		local killW = K.COL_KILL
+		local rateNum, shareNum, dmgNum, killNum = rateW, shareW, dmgW, killW
+		local probe = listRows and listRows[1]
+		local function textWidth(fs, text)
+			if not fs or not fs.GetStringWidth then
+				return 0
+			end
+			fs:SetText(text or "")
+			return fs:GetStringWidth() or 0
+		end
+		local function measureCol(fs, header, kind)
+			local wide = textWidth(fs, header)
+			local nums = 0
+			local i
+			for i = 1, n do
+				local entry = sorted[i]
+				local sample = ""
+				if kind == "rate" then
+					sample = fmtRate(entry.dps or 0)
+				elseif kind == "share" then
+					local part = 0
+					if board > 0 then
+						part = (entry.damage or 0) / board
+					end
+					sample = fmtPct(part)
+				elseif kind == "damage" then
+					sample = comma(entry.damage or 0)
+				elseif kind == "kills" then
+					if not entry.child and (entry.kills or 0) > 0 then
+						sample = tostring(entry.kills)
+					end
+				end
+				local w = textWidth(fs, sample)
+				if w > nums then
+					nums = w
+				end
+			end
+			if nums > wide then
+				wide = nums
+			end
+			if wide < 12 then
+				wide = 12
+			end
+			if nums < 8 then
+				nums = 8
+			end
+			return wide + 4, nums + 2
+		end
+		if probe then
+			local now = 0
+			if GetTime then
+				now = GetTime()
+			end
+			local function take(fs, header, kind)
+				local need, num = measureCol(fs, header, kind)
+				local slot = holdWidth(win, mode, kind, need, now)
+				if num > slot then
+					num = slot
+				end
+				return slot, num
+			end
+			if showRate and probe.rate then
+				rateW, rateNum = take(probe.rate, rateWord, "rate")
+			end
+			if showShare and probe.share then
+				shareW, shareNum = take(probe.share, "%", "share")
+			end
+			if showDmg and probe.damage then
+				dmgW, dmgNum = take(probe.damage, amountWord, "damage")
+			end
+			if showKill and probe.kills then
+				killW, killNum = take(probe.kills, "Kills", "kills")
 			end
 		end
+		stickCol(win.dpsCol, showRate, rateW)
+		stickCol(win.shareCol, showShare, shareW)
+		stickCol(win.dmgCol, showDmg, dmgW)
+		stickCol(win.killCol, showKill, killW)
+		win.rateW = rateW
+		win.shareW = shareW
+		win.dmgW = dmgW
+		win.killW = killW
+		win.rateNum = rateNum
+		win.shareNum = shareNum
+		win.dmgNum = dmgNum
+		win.killNum = killNum
 		local si
 		for si = 1, table.getn(win.sortBtns) do
 			local btn = win.sortBtns[si]
@@ -1806,21 +2119,29 @@ local function refreshWindow(win)
 	end
 	if win.modeBtns then
 		local mi
+		local shownTabs = 0
 		for mi = 1, table.getn(win.modeBtns) do
 			local btn = win.modeBtns[mi]
-			local on = btn.mode == mode and not popped[btn.mode]
-			if popped[btn.mode] then
-				btn.label:SetTextColor(0.45, 0.4, 0.32)
-				btn:SetBackdropColor(0.08, 0.06, 0.04, 0.4)
-				btn:SetBackdropBorderColor(0.4, 0.32, 0.16, 0.7)
-			elseif on then
-				btn.label:SetTextColor(btn.tr, btn.tg, btn.tb)
-				btn:SetBackdropColor(btn.br, btn.bg, btn.bb, 1)
-				btn:SetBackdropBorderColor(btn.er, btn.eg, btn.eb, 1)
+			local open = btn.mode ~= "party" or inParty()
+			if not open then
+				btn:Hide()
 			else
-				btn.label:SetTextColor(0.62, 0.54, 0.4)
-				btn:SetBackdropColor(0.12, 0.08, 0.04, 0.55)
-				btn:SetBackdropBorderColor(0.32, 0.22, 0.1, 1)
+				btn:Show()
+				shownTabs = shownTabs + 1
+				local on = btn.mode == mode and not popped[btn.mode]
+				if popped[btn.mode] then
+					btn.label:SetTextColor(0.45, 0.4, 0.32)
+					btn:SetBackdropColor(0.08, 0.06, 0.04, 0.4)
+					btn:SetBackdropBorderColor(0.4, 0.32, 0.16, 0.7)
+				elseif on then
+					btn.label:SetTextColor(btn.tr, btn.tg, btn.tb)
+					btn:SetBackdropColor(btn.br, btn.bg, btn.bb, 1)
+					btn:SetBackdropBorderColor(btn.er, btn.eg, btn.eb, 1)
+				else
+					btn.label:SetTextColor(0.62, 0.54, 0.4)
+					btn:SetBackdropColor(0.12, 0.08, 0.04, 0.55)
+					btn:SetBackdropBorderColor(0.32, 0.22, 0.1, 1)
+				end
 			end
 		end
 		local gap = 3
@@ -1828,7 +2149,7 @@ local function refreshWindow(win)
 		if inner < 40 then
 			inner = 40
 		end
-		local tabs = table.getn(win.modeBtns)
+		local tabs = shownTabs
 		if tabs < 1 then
 			tabs = 1
 		end
@@ -1844,17 +2165,19 @@ local function refreshWindow(win)
 		local x = 0
 		for mi = 1, table.getn(win.modeBtns) do
 			local btn = win.modeBtns[mi]
-			local wide = bw
-			if extra > 0 then
-				wide = wide + 1
-				extra = extra - 1
+			if btn.mode ~= "party" or inParty() then
+				local wide = bw
+				if extra > 0 then
+					wide = wide + 1
+					extra = extra - 1
+				end
+				btn:ClearAllPoints()
+				btn:SetWidth(wide)
+				if win.modes then
+					btn:SetPoint("LEFT", win.modes, "LEFT", x, 0)
+				end
+				x = x + wide + gap
 			end
-			btn:ClearAllPoints()
-			btn:SetWidth(wide)
-			if win.modes then
-				btn:SetPoint("LEFT", win.modes, "LEFT", x, 0)
-			end
-			x = x + wide + gap
 		end
 	end
 	if killView and (state.kills or 0) > 0 then
@@ -1879,8 +2202,159 @@ local function refreshWindow(win)
 	if savedLook and savedLook.cd == false then
 		showCd = false
 	end
+	local wrapOn = savedLook and savedLook.wrap
+	local rateW = win.rateW or K.COL_DPS
+	local shareW = win.shareW or K.COL_PCT
+	local dmgW = win.dmgW or K.COL_DMG
+	local killW = win.killW or K.COL_KILL
+	local rateNum = win.rateNum or rateW
+	local shareNum = win.shareNum or shareW
+	local dmgNum = win.dmgNum or dmgW
+	local killNum = win.killNum or killW
+	local numW = 2
+	local parts = {}
+	local function pushCol(slot, num, on)
+		if not on then
+			return
+		end
+		parts[table.getn(parts) + 1] = { slot = slot, num = num }
+	end
+	pushCol(rateW, rateNum, showRate)
+	pushCol(shareW, shareNum, showShare)
+	pushCol(dmgW, dmgNum, showDmg)
+	pushCol(killW, killNum, showKill)
+	local pi
+	local pn = table.getn(parts)
+	for pi = 1, pn do
+		local use = parts[pi].slot
+		if pi == pn then
+			use = parts[pi].num
+		end
+		numW = numW + use
+		if pi < pn then
+			numW = numW + 6
+		else
+			numW = numW + 4
+		end
+	end
+	local listW = rowWidth(win)
+	local rowHeights = {}
+	local totalH = 0
+	local hi
+	for hi = 1, n do
+		local entry = sorted[hi]
+		local h = K.ROW_H
+		entry.shown = nil
+		if wrapOn and listRows and listRows[1] and listRows[1].name then
+			local nameLeft = 16
+			if entry.child or (detail and entry.procs and entry.procs[1]) then
+				nameLeft = 28
+			end
+			local text = entry.name or ""
+			local fs = listRows[1].name
+			local rankGap = 0
+			if not entry.child then
+				fs:SetText(tostring(entry.rank or hi))
+				if fs.GetStringWidth then
+					rankGap = (fs:GetStringWidth() or 0) + 6
+				end
+			end
+			local avail = listW - nameLeft - rankGap - numW
+			if avail < 48 then
+				avail = 48
+			end
+			fs:SetText(text)
+			local tw = 0
+			if fs.GetStringWidth then
+				tw = fs:GetStringWidth() or 0
+			end
+			if tw > avail then
+				local breakAt = nil
+				local startAt = 1
+				while true do
+					local found = string.find(text, " ", startAt)
+					if not found then
+						break
+					end
+					fs:SetText(string.sub(text, 1, found - 1))
+					local lw = 0
+					if fs.GetStringWidth then
+						lw = fs:GetStringWidth() or 0
+					end
+					if lw <= avail then
+						breakAt = found
+						startAt = found + 1
+					else
+						break
+					end
+				end
+				if breakAt then
+					entry.shown = string.sub(text, 1, breakAt - 1) .. "\n" .. string.sub(text, breakAt + 1)
+					h = K.WRAP_H
+				end
+			end
+		end
+		rowHeights[hi] = h
+		totalH = totalH + h
+	end
+	local maxOff = totalH - viewH
+	if maxOff < 0 then
+		maxOff = 0
+	end
+	if pos > maxOff then
+		pos = maxOff
+	end
+	if pos < 0 then
+		pos = 0
+	end
+	local walked = 0
+	first = 0
+	for hi = 1, n do
+		local h = rowHeights[hi] or K.ROW_H
+		if walked + h > pos + 0.01 then
+			break
+		end
+		walked = walked + h
+		first = hi
+	end
+	shift = pos - walked
+	shown = 0
+	if n > 0 then
+		local covered = -shift
+		local vi = first
+		while vi < n and covered < viewH and shown < K.ROW_POOL do
+			vi = vi + 1
+			shown = shown + 1
+			covered = covered + (rowHeights[vi] or K.ROW_H)
+		end
+		if shown < 1 then
+			shown = 1
+		end
+	end
+	if win ~= frame then
+		win.scrollPos = pos
+	else
+		scroll = pos
+	end
+	if win.scrollChild then
+		local childH = 0
+		for hi = 1, shown do
+			childH = childH + (rowHeights[first + hi] or K.ROW_H)
+		end
+		if childH < viewH + shift then
+			childH = viewH + shift
+		end
+		if childH < 1 then
+			childH = 1
+		end
+		win.scrollChild:SetHeight(childH)
+	end
+	if win.scroll and win.scroll.SetVerticalScroll then
+		win.scroll:SetVerticalScroll(shift)
+	end
 
 	local i
+	local rowY = 0
 	for i = 1, K.ROW_POOL do
 		local row = listRows[i]
 		local data = nil
@@ -1897,52 +2371,166 @@ local function refreshWindow(win)
 			local label = data.name
 			row.data = data
 			row:Show()
+			local rowH = rowHeights[first + i] or K.ROW_H
+			row:ClearAllPoints()
+			row:SetPoint("TOPLEFT", row:GetParent(), "TOPLEFT", 0, -rowY)
 			row:SetWidth(rowWidth(win))
-			row.icon:SetTexture(rowIcon(data))
-			row.name:SetText(string.format("%d  %s", first + i, label))
-			if killView and (data.kills or 0) > 0 then
+			row:SetHeight(rowH)
+			row.bar:SetHeight(rowH)
+			rowY = rowY + rowH
+			local classCoord = nil
+			if data.classKey then
+				classCoord = CLASS_ICON[data.classKey]
+			end
+			if classCoord then
+				row.icon:SetTexture(K.CLASS_SHEET)
+				row.icon:SetTexCoord(classCoord[1], classCoord[2], classCoord[3], classCoord[4])
+			else
+				row.icon:SetTexture(rowIcon(data))
+				row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+			end
+			row.name:SetText(data.shown or label)
+			if data.shown then
+				row.name:SetHeight(K.WRAP_H - 2)
+			else
+				row.name:SetHeight(K.ROW_H)
+			end
+			if data.child then
+				row.name:SetTextColor(0.75, 0.82, 1)
+			else
+				row.name:SetTextColor(1, 0.95, 0.86)
+			end
+			if showKill and not data.child and (data.kills or 0) > 0 then
 				row.kills:SetText(tostring(data.kills))
 			else
 				row.kills:SetText("")
 			end
-			row.kills:ClearAllPoints()
-			row.damage:ClearAllPoints()
-			row.rate:ClearAllPoints()
-			row.name:ClearAllPoints()
-			row.rate:SetPoint("RIGHT", row, "RIGHT", -2, 0)
-			row.damage:SetPoint("RIGHT", row.rate, "LEFT", -6, 0)
-			row.name:SetPoint("LEFT", row, "LEFT", 16, 0)
-			if killView then
-				row.kills:Show()
-				row.kills:SetPoint("RIGHT", row.damage, "LEFT", -6, 0)
-				row.name:SetPoint("RIGHT", row.kills, "LEFT", -4, 0)
-			else
-				row.kills:Hide()
-				row.name:SetPoint("RIGHT", row.damage, "LEFT", -4, 0)
+			local nameLeft = 16
+			local iconLeft = 1
+			local hasProcs = data.procs and data.procs[1]
+			if row.arrow then
+				if detail and hasProcs and not data.child then
+					row.arrow:Show()
+					if config().open and config().open[data.name] then
+						row.arrow.text:SetText("v")
+					else
+						row.arrow.text:SetText(">")
+					end
+					nameLeft = 28
+					iconLeft = 13
+				else
+					row.arrow:Hide()
+				end
+			end
+			if data.child then
+				nameLeft = 28
+				iconLeft = 13
+			end
+			if row.arrow then
+				row.arrow:ClearAllPoints()
+				if data.shown then
+					row.arrow:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -1)
+				else
+					row.arrow:SetPoint("LEFT", row, "LEFT", 0, 0)
+				end
+			end
+			if row.iconBg then
+				row.iconBg:ClearAllPoints()
+				if data.shown then
+					row.iconBg:SetPoint("TOPLEFT", row, "TOPLEFT", iconLeft, -1)
+				else
+					row.iconBg:SetPoint("LEFT", row, "LEFT", iconLeft, 0)
+				end
+			end
+			local leftNum = nil
+			local function stickText(fs, on, colW)
+				if not fs then
+					return
+				end
+				fs:ClearAllPoints()
+				if not on then
+					fs:Hide()
+					return
+				end
+				fs:Show()
+				fs:SetWidth(colW)
+				fs:SetHeight(K.ROW_H)
+				if data.shown then
+					if not leftNum then
+						fs:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, -1)
+					else
+						fs:SetPoint("TOPRIGHT", leftNum, "TOPLEFT", -6, 0)
+					end
+				elseif not leftNum then
+					fs:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+				else
+					fs:SetPoint("RIGHT", leftNum, "LEFT", -6, 0)
+				end
+				leftNum = fs
 			end
 			row.damage:SetText(comma(dealt))
 			row.damage:SetTextColor(numR, numG, numB)
 			row.rate:SetText(fmtRate(data.dps or 0))
+			if row.share then
+				row.share:SetText(fmtPct(share))
+			end
+			stickText(row.rate, showRate, rateW)
+			stickText(row.share, showShare, shareW)
+			stickText(row.damage, showDmg, dmgW)
+			stickText(row.kills, showKill and not data.child, killW)
+			local rankGap = 0
+			if row.rank then
+				row.rank:ClearAllPoints()
+				if data.child then
+					row.rank:Hide()
+					row.rank:SetText("")
+				else
+					row.rank:SetText(tostring(data.rank or (first + i)))
+					row.rank:Show()
+					if data.shown then
+						row.rank:SetPoint("TOPLEFT", row, "TOPLEFT", nameLeft, -1)
+					else
+						row.rank:SetPoint("LEFT", row, "LEFT", nameLeft, 0)
+					end
+					if row.rank.GetStringWidth then
+						rankGap = (row.rank:GetStringWidth() or 0) + 6
+					end
+				end
+			end
+			row.name:ClearAllPoints()
+			if data.shown then
+				row.name:SetPoint("TOPLEFT", row, "TOPLEFT", nameLeft + rankGap, -1)
+				row.name:SetPoint("TOPRIGHT", row, "TOPRIGHT", -numW, -1)
+			else
+				row.name:SetPoint("LEFT", row, "LEFT", nameLeft + rankGap, 0)
+				row.name:SetPoint("RIGHT", row, "RIGHT", -numW, 0)
+			end
 			local fill = share
 			if dealt > 0 and fill < 0.015 then
 				fill = 0.015
 			end
 			row.bar:SetWidth(math.max(2, (row:GetWidth() or 1) * fill))
-			if first + i == 1 then
+			if data.child then
+				row.bar:SetVertexColor(tint[1], tint[2], tint[3], 0.4)
+			elseif first + i == 1 then
 				row.bar:SetVertexColor(tint[4], tint[5], tint[6], 0.9)
 			else
 				row.bar:SetVertexColor(tint[1], tint[2], tint[3], 0.75)
 			end
 			local procs = data.procs
 			local textW = 0
+			local fullName = row.name:GetText() or ""
+			local breakAt = string.find(fullName, "\n", 1, true)
+			if breakAt then
+				row.name:SetText(string.sub(fullName, 1, breakAt - 1))
+			end
 			if row.name.GetStringWidth then
 				textW = row.name:GetStringWidth() or 0
 			end
-			local px = 16 + textW + 4
-			local numW = K.COL_DMG + K.COL_DPS + 28
-			if killView then
-				numW = numW + K.COL_KILL
+			if breakAt then
+				row.name:SetText(fullName)
 			end
+			local px = nameLeft + rankGap + textW + 4
 			local limit = (row:GetWidth() or 0) - numW
 			if limit < 40 then
 				limit = 40
@@ -1950,7 +2538,20 @@ local function refreshWindow(win)
 			local pi
 			for pi = 1, 3 do
 				local btn = row.procBtns and row.procBtns[pi]
-				local info = procs and procs[pi]
+				local info = nil
+				if not data.child and pi == 1 and data.classKey and data.top and data.top ~= "" then
+					local tex = iconFor(data.top)
+					if tex and not string.find(string.lower(tex), "questionmark", 1, true) then
+						info = {
+							name = data.top,
+							dps = data.topdps or 0,
+							icon = tex,
+							topSpell = true,
+						}
+					end
+				elseif not detail and not data.child then
+					info = procs and procs[pi]
+				end
 				if btn and info then
 					if px > limit then
 						px = limit
@@ -1958,7 +2559,11 @@ local function refreshWindow(win)
 					btn.info = info
 					btn.win = win
 					if btn.icon then
-						btn.icon:SetTexture(iconFor(info.name))
+						local tex = info.icon
+						if not tex or tex == "" then
+							tex = iconFor(info.name)
+						end
+						btn.icon:SetTexture(tex)
 					end
 					btn:ClearAllPoints()
 					btn:SetPoint("LEFT", row, "LEFT", px, 0)
@@ -1969,7 +2574,10 @@ local function refreshWindow(win)
 					btn:Hide()
 				end
 			end
-			local cd = win.cdMap and win.cdMap[compactKey(data.name)]
+			local cd = nil
+			if not data.child then
+				cd = win.cdMap and win.cdMap[compactKey(data.name)]
+			end
 			if row.cd and showCd and cd and (tonumber(cd.cdmax) or 0) > 0 then
 				local maxc = tonumber(cd.cdmax) or 1
 				if maxc < 0.1 then
@@ -1998,6 +2606,12 @@ local function refreshWindow(win)
 		else
 			row.data = nil
 			row:Hide()
+			if row.rank then
+				row.rank:Hide()
+			end
+			if row.arrow then
+				row.arrow:Hide()
+			end
 			if row.procBtns then
 				local pi
 				for pi = 1, 3 do
@@ -2045,6 +2659,16 @@ local function refresh()
 		hideStockMeter()
 	end
 	refreshWindow(frame)
+	local partyWin = popped.party
+	if partyWin then
+		if inParty() then
+			if not partyWin:IsShown() then
+				partyWin:Show()
+			end
+		elseif partyWin:IsShown() then
+			partyWin:Hide()
+		end
+	end
 	local mode, pop
 	for mode, pop in pairs(popped) do
 		if pop:IsShown() then
@@ -2287,58 +2911,6 @@ local function parkBeside(win, anchor)
 		end
 	end
 	placeAtPixels(win, left, top)
-end
-
-local function anchorTopLeft(win)
-	local left, _, top = screenRect(win)
-	if not left then
-		return false
-	end
-	local x, y = toParent(left, top)
-	win:ClearAllPoints()
-	win:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
-	return true
-end
-
-local function beginDrag(win)
-	if not win then
-		return
-	end
-	local cx, cy = GetCursorPosition()
-	if not cx or not cy then
-		return
-	end
-	local left, _, top = screenRect(win)
-	if not left then
-		return
-	end
-	win.dragOn = true
-	win.dragMoved = false
-	win.dragDX = cx - left
-	win.dragDY = cy - top
-	win.dragX0 = cx
-	win.dragY0 = cy
-end
-
-local function stepDrag(win)
-	if not win or not win.dragOn then
-		return false
-	end
-	if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
-		win.dragOn = nil
-		return true
-	end
-	local cx, cy = GetCursorPosition()
-	if not cx or not cy then
-		return false
-	end
-	local dx = cx - (win.dragX0 or cx)
-	local dy = cy - (win.dragY0 or cy)
-	if dx * dx + dy * dy > 16 then
-		win.dragMoved = true
-	end
-	placeAtPixels(win, cx - (win.dragDX or 0), cy - (win.dragDY or 0))
-	return false
 end
 
 local function noteClamped()
@@ -2613,9 +3185,11 @@ local function showHeaderTip(kind, mode)
 			line = "Starts the healing view over. Damage and kills are kept."
 		elseif mode == "boss" then
 			line = "Starts the boss view over. Damage and kills are kept."
-		elseif mode == "taken" then
-			line = "Starts the taken view over. Damage dealt and kills are kept."
-		end
+			elseif mode == "taken" then
+				line = "Starts the taken view over. Damage dealt and kills are kept."
+			elseif mode == "party" then
+				line = "Starts the party view over. Your own damage and kills are kept."
+			end
 		showTip(this, "RIGHT", "Reset", nil, {
 			{ line, 1, 1, 1 },
 			{ "The built-in meter keeps its own numbers.", 0.75, 0.75, 0.75 },
@@ -2654,6 +3228,11 @@ local function showHeaderTip(kind, mode)
 				if reset then
 					body = "Average damage taken per second since the last reset."
 				end
+			elseif mode == "party" then
+				body = "Average party damage per second since the start of the run."
+				if reset then
+					body = "Average party damage per second since the last reset."
+				end
 			end
 		else
 			local span = n .. " seconds"
@@ -2665,6 +3244,8 @@ local function showHeaderTip(kind, mode)
 				body = "Damage per second over the last " .. span .. " of this boss fight."
 			elseif mode == "taken" then
 				body = "Damage taken per second over the last " .. span .. "."
+			elseif mode == "party" then
+				body = "Party damage per second over the last " .. span .. "."
 			end
 		end
 		showTip(this, "LEFT", title, nil, {
@@ -2684,6 +3265,9 @@ local function showHeaderTip(kind, mode)
 	elseif mode == "taken" then
 		title = "Taken"
 		tip = "Damage you took this run, split by what hit you."
+	elseif mode == "party" then
+		title = "Party"
+		tip = "Damage dealt by each hero in the party."
 	end
 	local bKey = baseFields(mode)
 	if state and state[bKey] then
@@ -2795,6 +3379,53 @@ local function createRow(parent, index)
 	iconBg:SetWidth(13)
 	iconBg:SetHeight(13)
 	iconBg:SetPoint("LEFT", row, "LEFT", 1, 0)
+	row.iconBg = iconBg
+
+	local arrow = CreateFrame("Button", nil, row)
+	arrow:SetWidth(12)
+	arrow:SetHeight(14)
+	arrow:SetPoint("LEFT", row, "LEFT", 0, 0)
+	arrow:SetFrameLevel((row:GetFrameLevel() or 1) + 3)
+	local arrowText = arrow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	arrowText:SetPoint("CENTER", arrow, "CENTER", 1, 0)
+	arrowText:SetJustifyH("CENTER")
+	face(arrowText, 11)
+	arrowText:SetTextColor(1, 0.86, 0.5)
+	arrowText:SetText(">")
+	arrow.text = arrowText
+	arrow:SetScript("OnClick", function()
+		local owner = this:GetParent()
+		local data = owner and owner.data
+		if not data or not data.name or data.child then
+			return
+		end
+		local cfg = config()
+		if not cfg.open then
+			cfg.open = {}
+		end
+		if cfg.open[data.name] then
+			cfg.open[data.name] = nil
+		else
+			cfg.open[data.name] = true
+		end
+		refresh()
+	end)
+	arrow:SetScript("OnEnter", function()
+		local owner = this:GetParent()
+		local data = owner and owner.data
+		local line = "List the talents grouped into this spell."
+		if data and config().open and config().open[data.name] then
+			line = "Hide the talents grouped into this spell."
+		end
+		showTip(this, "RIGHT", "Talents", nil, {
+			{ line, 1, 1, 1 },
+		})
+	end)
+	arrow:SetScript("OnLeave", function()
+		leaveTip()
+	end)
+	arrow:Hide()
+	row.arrow = arrow
 
 	local icon = row:CreateTexture(nil, "OVERLAY")
 	icon:SetWidth(11)
@@ -2810,6 +3441,13 @@ local function createRow(parent, index)
 	cd:SetPoint("BOTTOMLEFT", iconBg, "BOTTOMLEFT", 1, 0)
 	cd:Hide()
 	row.cd = cd
+
+	local rank = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	rank:SetJustifyH("LEFT")
+	face(rank, 10)
+	rank:SetTextColor(1, 0.95, 0.86)
+	rank:Hide()
+	row.rank = rank
 
 	local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	name:SetPoint("LEFT", row, "LEFT", 16, 0)
@@ -2838,6 +3476,13 @@ local function createRow(parent, index)
 	face(rate, 10)
 	rate:SetTextColor(0.7, 0.92, 0.68)
 	row.rate = rate
+
+	local share = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	share:SetWidth(K.COL_PCT)
+	share:SetJustifyH("RIGHT")
+	face(share, 10)
+	share:SetTextColor(0.95, 0.86, 0.62)
+	row.share = share
 
 	rate:SetPoint("RIGHT", row, "RIGHT", -2, 0)
 	damage:SetPoint("RIGHT", rate, "LEFT", -6, 0)
@@ -2870,7 +3515,28 @@ local function createRow(parent, index)
 			if killView and not isProc(data.proc) and not data.cast then
 				table.insert(lines, { string.format("Kills %d", data.kills or 0), 1, 0.82, 0.45 })
 			end
-			if data.procs and data.procs[1] then
+			local landed = data.hits or 0
+			local crits = data.crits or 0
+			if landed > 0 then
+				if crits > landed then
+					crits = landed
+				end
+				table.insert(lines, { string.format("%d hits, %d crits, %s crit", landed, crits, fmtPct(crits / landed)), 1, 0.82, 0.55 })
+			end
+			if data.top and data.top ~= "" then
+				local topLine = "Most from " .. data.top
+				if data.topdps and data.topdps > 0 then
+					topLine = topLine .. ", " .. fmtRate(data.topdps) .. " dps"
+				end
+				table.insert(lines, { topLine, 0.75, 0.85, 1 })
+			end
+			if data.child then
+				local into = "Grouped into the spell above."
+				if data.parentName and data.parentName ~= "" then
+					into = "Grouped into " .. data.parentName .. "."
+				end
+				table.insert(lines, { into, 0.65, 0.78, 1 })
+			elseif data.procs and data.procs[1] then
 				local text = data.procs[1].name
 				local pi
 				for pi = 2, table.getn(data.procs) do
@@ -2882,7 +3548,11 @@ local function createRow(parent, index)
 			elseif isProc(data.proc) then
 				table.insert(lines, { "Proc.", 0.7, 0.7, 0.7 })
 			end
-			paintTip(data.name, rowIcon(data), lines)
+			local tipIcon = nil
+			if not data.classKey then
+				tipIcon = rowIcon(data)
+			end
+			paintTip(data.name, tipIcon, lines)
 		end)
 	end)
 	row:SetScript("OnLeave", function()
@@ -2918,17 +3588,37 @@ local function createRow(parent, index)
 					total = host.total
 				end
 				local amountWord, rateWord = meterWords(host and host.fixed)
-				local share = 0
-				if total > 0 then
-					share = (info.damage or 0) / total
+				local lines
+				if info.topSpell then
+					lines = {
+						{ string.format("%s %s", rateWord, fmtRate(info.dps or 0)), 0.7, 0.92, 0.68 },
+						{ "Their highest damage spell.", 0.75, 0.85, 1 },
+					}
+				else
+					local share = 0
+					if total > 0 then
+						share = (info.damage or 0) / total
+					end
+					lines = {
+						{ string.format("%s %s", amountWord, comma(info.damage or 0)), 1, 1, 1 },
+						{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
+						{ string.format("%s %s", rateWord, fmtRate(info.dps or 0)), 0.7, 0.92, 0.68 },
+					}
+					local landed = info.hits or 0
+					local crits = info.crits or 0
+					if landed > 0 then
+						if crits > landed then
+							crits = landed
+						end
+						table.insert(lines, { string.format("%d hits, %d crits, %s crit", landed, crits, fmtPct(crits / landed)), 1, 0.82, 0.55 })
+					end
+					table.insert(lines, { "Proc.", 0.65, 0.78, 1 })
 				end
-				local lines = {
-					{ string.format("%s %s", amountWord, comma(info.damage or 0)), 1, 1, 1 },
-					{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
-					{ string.format("%s %s", rateWord, fmtRate(info.dps or 0)), 0.7, 0.92, 0.68 },
-					{ "Proc.", 0.65, 0.78, 1 },
-				}
-				paintTip(info.name, iconFor(info.name), lines)
+				local tipIcon = info.icon
+				if not tipIcon or tipIcon == "" then
+					tipIcon = iconFor(info.name)
+				end
+				paintTip(info.name, tipIcon, lines)
 			end)
 			this:SetBackdropBorderColor(0.7, 0.86, 1, 1)
 		end)
@@ -2944,14 +3634,14 @@ local function createRow(parent, index)
 	return row
 end
 
-local VIEW_ORDER = { "damage", "healing", "boss", "taken" }
+local VIEW_ORDER = { "damage", "healing", "boss", "taken", "party" }
 local createDetached, detach, dock
 
 local function otherHome(skip)
 	local i
 	for i = 1, table.getn(VIEW_ORDER) do
 		local mode = VIEW_ORDER[i]
-		if mode ~= skip and not popped[mode] then
+		if mode ~= skip and not popped[mode] and (mode ~= "party" or inParty()) then
 			return mode
 		end
 	end
@@ -3153,9 +3843,9 @@ local function applyLook(buttons)
 			paintBorder(settings.resetBtn, brdR, brdG, brdB)
 		end
 	end
-	local keys = { "damage", "healing", "boss", "taken" }
+	local keys = { "damage", "healing", "boss", "taken", "party" }
 	local ki
-	for ki = 1, 4 do
+	for ki = 1, table.getn(keys) do
 		local key = keys[ki]
 		local r, g, b = lookColor(key)
 		local tint = HEADER_TINT[key]
@@ -3299,6 +3989,8 @@ createDetached = function(mode)
 			say("Reset. Boss damage starts over in this window. The built-in meter is unchanged.")
 		elseif mode == "taken" then
 			say("Reset. Damage taken starts over in this window.")
+		elseif mode == "party" then
+			say("Reset. Party damage starts over in this window.")
 		else
 			say("Reset. Damage and kills start over in this window. The built-in meter is unchanged.")
 		end
@@ -3408,11 +4100,14 @@ createDetached = function(mode)
 
 	local dpsCol = makeSortButton("dps", "DPS", K.COL_DPS, "RIGHT")
 	dpsCol:SetPoint("RIGHT", cols, "RIGHT", -2, 0)
+	local shareCol = makeSortButton("share", "%", K.COL_PCT, "RIGHT")
+	shareCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
 	local dmgCol = makeSortButton("damage", "Damage", K.COL_DMG, "RIGHT")
-	dmgCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
+	dmgCol:SetPoint("RIGHT", shareCol, "LEFT", -6, 0)
 	local killCol = makeSortButton("kills", "Kills", K.COL_KILL, "RIGHT")
 	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -6, 0)
 	win.dpsCol = dpsCol
+	win.shareCol = shareCol
 	win.dmgCol = dmgCol
 	win.killCol = killCol
 
@@ -3457,6 +4152,10 @@ createDetached = function(mode)
 			for pi = 1, 3 do
 				win.rows[i].procBtns[pi]:EnableMouseWheel(true)
 				win.rows[i].procBtns[pi]:SetScript("OnMouseWheel", onWheel)
+			end
+			if win.rows[i].arrow then
+				win.rows[i].arrow:EnableMouseWheel(true)
+				win.rows[i].arrow:SetScript("OnMouseWheel", onWheel)
 			end
 		end
 	end
@@ -3782,7 +4481,7 @@ local function buildSettings()
 	local box = CreateFrame("Frame", "AZSSpellMeterSettings", UIParent)
 	settings = box
 	box:SetWidth(248)
-	box:SetHeight(424)
+	box:SetHeight(552)
 	box:SetFrameStrata("DIALOG")
 	box:SetMovable(true)
 	box:EnableMouse(true)
@@ -3988,9 +4687,23 @@ local function buildSettings()
 	box.cdMark = cdHit.mark
 	local lockHit = makeCheck(-210, "Lock windows")
 	box.lockMark = lockHit.mark
+	local detailHit = makeCheck(-228, "Under the spell")
+	box.detailMark = detailHit.mark
+	local wrapHit = makeCheck(-246, "Wrap names")
+	box.wrapMark = wrapHit.mark
+
+	local columns = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	columns:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -268)
+	columns:SetText("Columns")
+	face(columns, 10)
+	columns:SetTextColor(1, 0.9, 0.62)
+	local colKillHit = makeCheck(-284, "Kills")
+	local colDmgHit = makeCheck(-302, "Damage")
+	local colShareHit = makeCheck(-320, "Share")
+	local colDpsHit = makeCheck(-338, "DPS")
 
 	local colors = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	colors:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -234)
+	colors:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -362)
 	colors:SetText("Colors")
 	face(colors, 10)
 	colors:SetTextColor(1, 0.9, 0.62)
@@ -4002,6 +4715,7 @@ local function buildSettings()
 		{ key = "healing", name = "Healing", tip = "Healing title, bars, and numbers." },
 		{ key = "boss", name = "Boss", tip = "Boss title, bars, and numbers." },
 		{ key = "taken", name = "Taken", tip = "Taken title, bars, and numbers." },
+		{ key = "party", name = "Party", tip = "Party title, bars, and numbers." },
 	}
 	box.swatches = {}
 	local sw, gap, n = 22, 8, table.getn(picks)
@@ -4013,7 +4727,7 @@ local function buildSettings()
 		local b = CreateFrame("Button", nil, box)
 		b:SetWidth(sw)
 		b:SetHeight(sw)
-		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -250)
+		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -378)
 		b:SetBackdrop(roundBackdrop(8))
 		b.key = spec.key
 		b.pickName = spec.name
@@ -4035,15 +4749,15 @@ local function buildSettings()
 	end
 
 	local caption = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -278)
+	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -406)
 	caption:SetText("Window")
 	face(caption, 10)
 	caption:SetTextColor(1, 0.9, 0.62)
 	box.caption = caption
 
-	local redSlider, redValue, redName = makeSlider(-296, "Red", 0, 255, 1)
-	local greenSlider, greenValue, greenName = makeSlider(-328, "Green", 0, 255, 1)
-	local blueSlider, blueValue, blueName = makeSlider(-360, "Blue", 0, 255, 1)
+	local redSlider, redValue, redName = makeSlider(-424, "Red", 0, 255, 1)
+	local greenSlider, greenValue, greenName = makeSlider(-456, "Green", 0, 255, 1)
+	local blueSlider, blueValue, blueName = makeSlider(-488, "Blue", 0, 255, 1)
 	redName:SetTextColor(1, 0.55, 0.45)
 	greenName:SetTextColor(0.55, 0.9, 0.55)
 	blueName:SetTextColor(0.55, 0.75, 1)
@@ -4111,6 +4825,27 @@ local function buildSettings()
 		else
 			lockHit.mark:Hide()
 		end
+		if lookValue("detail") then
+			detailHit.mark:Show()
+		else
+			detailHit.mark:Hide()
+		end
+		if lookValue("wrap") then
+			wrapHit.mark:Show()
+		else
+			wrapHit.mark:Hide()
+		end
+		local function showCol(hit, key)
+			if lookValue(key) == false then
+				hit.mark:Hide()
+			else
+				hit.mark:Show()
+			end
+		end
+		showCol(colKillHit, "colKill")
+		showCol(colDmgHit, "colDmg")
+		showCol(colShareHit, "colShare")
+		showCol(colDpsHit, "colDps")
 		local pick = box.pick or "panel"
 		local i
 		for i = 1, table.getn(box.swatches) do
@@ -4306,6 +5041,67 @@ local function buildSettings()
 	lockHit:SetScript("OnLeave", function()
 		leaveTip()
 	end)
+	detailHit:SetScript("OnClick", function()
+		local saved = ensureLook()
+		if saved.detail then
+			saved.detail = nil
+		else
+			saved.detail = true
+		end
+		syncSettings()
+		refresh()
+	end)
+	detailHit:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "Under the spell", nil, {
+			{ "An arrow on a spell opens the talents grouped into it.", 1, 1, 1 },
+			{ "Off leaves those talents as icons beside the name.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	detailHit:SetScript("OnLeave", function()
+		leaveTip()
+	end)
+	wrapHit:SetScript("OnClick", function()
+		local saved = ensureLook()
+		if saved.wrap then
+			saved.wrap = nil
+		else
+			saved.wrap = true
+		end
+		syncSettings()
+		refresh()
+	end)
+	wrapHit:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "Wrap names", nil, {
+			{ "A long name uses a second line only when it does not fit beside the numbers.", 1, 1, 1 },
+		})
+	end)
+	wrapHit:SetScript("OnLeave", function()
+		leaveTip()
+	end)
+	local function bindCol(hit, key, title, line)
+		hit:SetScript("OnClick", function()
+			local saved = ensureLook()
+			if saved[key] == false then
+				saved[key] = nil
+			else
+				saved[key] = false
+			end
+			syncSettings()
+			refresh()
+		end)
+		hit:SetScript("OnEnter", function()
+			showTip(this, "RIGHT", title, nil, {
+				{ line, 1, 1, 1 },
+			})
+		end)
+		hit:SetScript("OnLeave", function()
+			leaveTip()
+		end)
+	end
+	bindCol(colKillHit, "colKill", "Kills", "Show or hide the kill count.")
+	bindCol(colDmgHit, "colDmg", "Damage", "Show or hide the damage numbers.")
+	bindCol(colShareHit, "colShare", "Share", "Show or hide each spell's part of the total.")
+	bindCol(colDpsHit, "colDps", "DPS", "Show or hide the DPS numbers.")
 
 	resetBtn:SetScript("OnClick", function()
 		local cfg = config()
@@ -4328,7 +5124,7 @@ local function buildSettings()
 		resetText:SetTextColor(1, 0.95, 0.75)
 		resetBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
 		showTip(this, "RIGHT", "Reset settings", nil, {
-			{ "Puts scale, the DPS window, colors, cooldown bars, and the lock back.", 1, 1, 1 },
+			{ "Puts scale, the DPS window, columns, colors, cooldown bars, and the lock back.", 1, 1, 1 },
 			{ "Numbers and where the windows sit are kept.", 0.75, 0.75, 0.75 },
 		})
 	end)
@@ -4485,6 +5281,7 @@ local function buildMainChrome()
 		{ mode = "healing", text = "Healing", tip = "Healing this run. Overhealing is left out.", tr = 0.72, tg = 0.95, tb = 0.7, br = 0.14, bg = 0.32, bb = 0.16, er = 0.45, eg = 0.78, eb = 0.4 },
 		{ mode = "boss", text = "Boss", tip = "Damage from the last boss fight. Bosses that are up together count as one fight.", tr = 1, tg = 0.72, tb = 0.42, br = 0.4, bg = 0.16, bb = 0.08, er = 0.9, eg = 0.45, eb = 0.16 },
 		{ mode = "taken", text = "Taken", tip = "Damage you took, split by what hit you.", tr = 1, tg = 0.55, tb = 0.45, br = 0.38, bg = 0.12, bb = 0.1, er = 0.85, eg = 0.35, eb = 0.28 },
+		{ mode = "party", text = "Party", tip = "Damage dealt by each hero in the party. Empty when you are not in one.", tr = 0.7, tg = 0.82, tb = 1, br = 0.14, bg = 0.2, bb = 0.38, er = 0.45, eg = 0.62, eb = 0.95 },
 	}
 	local msi
 	for msi = 1, table.getn(modeSpec) do
@@ -4500,7 +5297,7 @@ local function buildMainChrome()
 		local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		label:SetPoint("CENTER", btn, "CENTER", 0, 0)
 		label:SetText(spec.text)
-		face(label, 10)
+		face(label, 9)
 		btn.label = label
 		if btn.RegisterForClicks then
 			btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -4604,7 +5401,7 @@ local function buildMainChrome()
 	setBtn:SetScript("OnEnter", function()
 		setBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
 		showTip(this, "RIGHT", "Settings", nil, {
-			{ "Scale, DPS window, colors, cooldown bars, and lock.", 1, 1, 1 },
+			{ "Scale, DPS window, columns, colors, cooldown bars, and lock.", 1, 1, 1 },
 		})
 	end)
 	setBtn:SetScript("OnLeave", function()
@@ -4635,6 +5432,8 @@ local function buildMainChrome()
 			say("Reset. Boss damage starts over in this window. The built-in meter is unchanged.")
 		elseif mode == "taken" then
 			say("Reset. Damage taken starts over in this window.")
+		elseif mode == "party" then
+			say("Reset. Party damage starts over in this window.")
 		else
 			say("Reset. Damage and kills start over in this window. The built-in meter is unchanged.")
 		end
@@ -4765,6 +5564,12 @@ local function buildMainChrome()
 					{ "This spell's rate. Click to sort.", 1, 1, 1 },
 					{ "Click again to reverse the order.", 0.75, 0.75, 0.75 },
 				}
+			elseif picked == "share" then
+				title = "Share"
+				lines = {
+					{ "This spell's part of the total. Click to sort.", 1, 1, 1 },
+					{ "Click again to reverse the order.", 0.75, 0.75, 0.75 },
+				}
 			end
 			showTip(this, "RIGHT", title, nil, lines)
 		end)
@@ -4777,11 +5582,14 @@ local function buildMainChrome()
 
 	local dpsCol = makeSortButton("dps", "DPS", K.COL_DPS, "RIGHT")
 	dpsCol:SetPoint("RIGHT", cols, "RIGHT", -2, 0)
+	local shareCol = makeSortButton("share", "%", K.COL_PCT, "RIGHT")
+	shareCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
 	local dmgCol = makeSortButton("damage", "Damage", K.COL_DMG, "RIGHT")
-	dmgCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
+	dmgCol:SetPoint("RIGHT", shareCol, "LEFT", -6, 0)
 	local killCol = makeSortButton("kills", "Kills", K.COL_KILL, "RIGHT")
 	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -6, 0)
 	frame.dpsCol = dpsCol
+	frame.shareCol = shareCol
 	frame.dmgCol = dmgCol
 	frame.killCol = killCol
 end
@@ -4896,6 +5704,10 @@ local function buildMainList()
 		local pi
 		for pi = 1, 3 do
 			rows[i].procBtns[pi]:SetScript("OnMouseWheel", onMainWheel)
+		end
+		if rows[i].arrow then
+			rows[i].arrow:EnableMouseWheel(true)
+			rows[i].arrow:SetScript("OnMouseWheel", onMainWheel)
 		end
 	end
 	scrollFrame:SetScript("OnMouseWheel", onMainWheel)
@@ -5239,6 +6051,8 @@ SlashCmdList["AZSSPELLMETER"] = function(msg)
 			say("Reset. Boss damage starts over in this window. The built-in meter is unchanged.")
 		elseif mode == "taken" then
 			say("Reset. Damage taken starts over in this window.")
+		elseif mode == "party" then
+			say("Reset. Party damage starts over in this window.")
 		else
 			say("Reset. Damage and kills start over in this window. The built-in meter is unchanged.")
 		end

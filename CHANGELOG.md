@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.27
+
+Tested with game 0.113.1.
+
+- Share shows each spell's part of the total.
+- Kills, Damage, Share, and DPS can each be hidden.
+- Under the spell adds an arrow that opens the talents grouped into a spell.
+- Sweeping Strikes shows on Cleave, Mortal Strike, and Execute.
+- An item that adds to a spell is grouped into that spell.
+- A pet's attacks use the pet's name.
+- Infernal, Doomguard, and Felguard have icons.
+- Hover a spell to see its hits, crits, and crit chance.
+- Columns widen just enough for a long number, and they stop shifting as DPS changes.
+- Wrap names splits a long name onto a second line. It is off until you turn it on.
+- An item's icon stays after a reload, once the meter has seen it.
+- Party shows each hero's damage while you are in co-op.
+- The Party tab is hidden when you play alone.
+- Each hero's strongest spell sits beside their name.
+
 ## 1.26
 
 Tested with game 0.107.0.
