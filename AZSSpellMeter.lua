@@ -746,6 +746,8 @@ local function resetData()
 	castGaps = {}
 	castHeld = false
 	lastBlow = {}
+	state.petName = nil
+	state.petIcon = nil
 	testMeter = nil
 	runSeen = nil
 end
@@ -895,6 +897,12 @@ local EXTRA_ICONS = {
 	["Felhunter"] = "Spell_Shadow_SummonFelHunter",
 	["Succubus"] = "Spell_Shadow_SummonSuccubus",
 	["Pit Lord"] = "Spell_Shadow_UnholyStrength",
+	["Pets"] = "Ability_Hunter_BeastCall",
+	["Water Elemental"] = "Spell_Frost_SummonWaterElemental",
+	["Treant"] = "Spell_Nature_ForceOfNature",
+	["Spirit Wolf"] = "Spell_Nature_SpiritWolf",
+	["Wolf"] = "Ability_Hunter_Pet_Wolf",
+	["Raptor"] = "Ability_Hunter_Pet_Raptor",
 	["Amulet of the Ancients"] = "INV_Jewelry_Necklace_13",
 	["Amulet of the Inferno"] = "INV_Jewelry_Necklace_AhnQiraj_03",
 	["Arcane Fortitude"] = "Spell_Arcane_ArcaneResilience",
@@ -1933,16 +1941,71 @@ local function rebuild(mode)
 		bucket[name] = row
 		return row
 	end
+	local function oneSummon()
+		local list = nil
+		if AZS_GetSummonGroups then
+			list = AZS_GetSummonGroups()
+		end
+		if not list and AZS_GetSummons then
+			list = AZS_GetSummons()
+		end
+		if not list and AZS_PETS then
+			list = AZS_PETS
+		end
+		if not list then
+			return nil
+		end
+		local seen = nil
+		local icon = nil
+		local several = false
+		local si
+		for si = 1, table.getn(list) do
+			local summon = list[si]
+			local summonName = summon and summon.name
+			if summonName and summonName ~= "" then
+				if not seen then
+					seen = summonName
+					icon = summon.icon
+				elseif seen ~= summonName then
+					several = true
+				end
+			end
+		end
+		if several then
+			return nil, nil, true
+		end
+		if seen then
+			return seen, icon, false
+		end
+		return nil
+	end
 	if lines then
 		for i = 1, table.getn(lines) do
 			local line = lines[i]
-			local name = line.name
+			local meterName = line.name
+			local name = meterName
+			local summonIcon = nil
+			if meterName == "Pets" then
+				local summoned, simg, several = oneSummon()
+				if several then
+					state.petName = nil
+					state.petIcon = nil
+				elseif summoned then
+					name = summoned
+					summonIcon = simg
+					state.petName = summoned
+					state.petIcon = simg
+				elseif state.petName and state.petName ~= "" then
+					name = state.petName
+					summonIcon = state.petIcon
+				end
+			end
 			if name and name ~= "" then
 				local row = bucketOf(name)
 				local raw = tonumber(line.dmg) or 0
 				local dealt = raw
 				if baseMap then
-					dealt = raw - (baseMap[name] or 0)
+					dealt = raw - (baseMap[meterName] or 0)
 					if dealt < 0 then
 						dealt = 0
 					end
@@ -1954,6 +2017,13 @@ local function rebuild(mode)
 				row.proc = isProc(line.proc)
 				row.fromMeter = true
 				row.iconPath = usableIcon(line.icon)
+				if summonIcon and summonIcon ~= "" then
+					local path = usableIcon(summonIcon) or asTexture(summonIcon)
+					if path then
+						row.iconPath = path
+						keepIcon(name, path)
+					end
+				end
 				if line.class and line.class ~= "" then
 					row.classKey = string.lower(line.class)
 				end
@@ -2687,6 +2757,30 @@ local function refreshWindow(win)
 			numW = numW + 4
 		end
 	end
+	-- Icons drawn after the name. Their width stays out of the Kills column.
+	local function trailIcons(entry)
+		if not entry or entry.child then
+			return 0
+		end
+		if entry.classKey and entry.top and entry.top ~= "" then
+			local tex = iconFor(entry.top)
+			if tex and not string.find(string.lower(tex), "questionmark", 1, true) then
+				return 1
+			end
+			return 0
+		end
+		if detail then
+			return 0
+		end
+		local nproc = 0
+		if entry.procs then
+			nproc = table.getn(entry.procs)
+		end
+		if nproc > 3 then
+			nproc = 3
+		end
+		return nproc
+	end
 	local listW = rowWidth(win)
 	local rowHeights = {}
 	local totalH = 0
@@ -2709,7 +2803,7 @@ local function refreshWindow(win)
 					rankGap = (fs:GetStringWidth() or 0) + 6
 				end
 			end
-			local avail = listW - nameLeft - rankGap - numW
+			local avail = listW - nameLeft - rankGap - numW - trailIcons(entry) * 16
 			if avail < 48 then
 				avail = 48
 			end
@@ -2928,6 +3022,8 @@ local function refreshWindow(win)
 			stickText(row.share, showShare, shareW)
 			stickText(row.damage, showDmg, dmgW)
 			stickText(row.kills, showKill and not data.child, killW)
+			local iconReserve = trailIcons(data) * 16
+			local nameRight = numW + iconReserve
 			local rankGap = 0
 			if row.rank then
 				row.rank:ClearAllPoints()
@@ -2950,10 +3046,10 @@ local function refreshWindow(win)
 			row.name:ClearAllPoints()
 			if data.shown then
 				row.name:SetPoint("TOPLEFT", row, "TOPLEFT", nameLeft + rankGap, -1)
-				row.name:SetPoint("TOPRIGHT", row, "TOPRIGHT", -numW, -1)
+				row.name:SetPoint("TOPRIGHT", row, "TOPRIGHT", -nameRight, -1)
 			else
 				row.name:SetPoint("LEFT", row, "LEFT", nameLeft + rankGap, 0)
-				row.name:SetPoint("RIGHT", row, "RIGHT", -numW, 0)
+				row.name:SetPoint("RIGHT", row, "RIGHT", -nameRight, 0)
 			end
 			local fill = share
 			if dealt > 0 and fill < 0.015 then
@@ -2981,7 +3077,7 @@ local function refreshWindow(win)
 				row.name:SetText(fullName)
 			end
 			local px = nameLeft + rankGap + textW + 4
-			local limit = (row:GetWidth() or 0) - numW
+			local limit = (row:GetWidth() or 0) - numW - iconReserve
 			if limit < 40 then
 				limit = 40
 			end

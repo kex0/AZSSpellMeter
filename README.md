@@ -46,6 +46,14 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ## Changelog
 
+### 1.31
+
+Tested with game 0.113.3.
+
+- An icon after a spell name no longer covers that spell's kill count.
+- Damage from your only summon, such as a Water Elemental, uses that summon's name and icon.
+- Wolf, Raptor, Treant, and Spirit Wolf have icons.
+
 ### 1.30
 
 Tested with game 0.113.3.
