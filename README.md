@@ -13,9 +13,10 @@ Per-spell damage for [Azeroth Survivors](https://wow.aethus.pl/). Damage and eac
 
 ## Install
 
-1. In game, open **Options → AddOns → Open AddOns Folder**.
-2. Put this folder there, so the path ends in `AddOns/AZSSpellMeter/AZSSpellMeter.toc`.
-3. Relog. Addons only load at login.
+1. Download the zip from the [latest release](https://github.com/kex0/AZSSpellMeter/releases/latest). Use the file named `AZSSpellMeter`, not the Source code links. Those unpack as `AZSSpellMeter-main`, and the game will not list that folder.
+2. In game, open **Options → AddOns → Open AddOns Folder**.
+3. Unzip there, so the path ends in `AddOns/AZSSpellMeter/AZSSpellMeter.toc`. A folder named `AZSSpellMeter-main` or `AZSSpellMeter-1.32` will not load. Rename it to `AZSSpellMeter`, or if that folder is inside it, move that one up into AddOns.
+4. Relog. Addons only load at login.
 
 Requires Azeroth Survivors 0.87 or newer, for `AZS_GetMeter`. Healing, Boss, and Taken need a current game build.
 
