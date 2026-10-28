@@ -2,7 +2,7 @@
 
 ## 1.32
 
-Tested with game 0.113.3.
+Tested with game 0.123.0.
 
 - Each spell alone lists every spell, talent, and item on its own row, as Damage Done does.
 - A proc in that list has no kill count, because a proc is the spell it casts.
