@@ -6,13 +6,10 @@ Per-spell damage for [Azeroth Survivors](https://wow.aethus.pl/). Damage and eac
 
 ## Why use this instead of Damage Done
 
-The built-in meter is the right tally. This one reads those same numbers and adds the things it doesn't show.
-
+- **Several views at once.** Right-click Damage, Healing, Boss, Taken, or Party to open that view in its own window. Spell damage can stay up beside healing, or beside the last boss fight.
 - **Kills per spell.** The kill column is how many creatures that spell finished.
 - **The spell that was actually cast.** Pyroclasm's explosion is Blast Wave. Damage Done lists Pyroclasm on its own. This meter puts that damage on Blast Wave and leaves a proc button beside it. Upgrading Blast Wave is what upgrades the proc, and the row makes that obvious. Hover the button for the proc's own damage, DPS, and icon.
 - **Sortable columns.** Click Kills, Damage, or DPS. Click again to reverse the order.
-- **A reset that is yours.** Reset starts this window over. The built-in meter keeps its own numbers, so you can measure a stretch of the run without wiping the game's tally.
-- **It gets out of the way.** The minus button collapses the window onto a small bubble. Click the bubble to open it again.
 
 ## Install
 
@@ -28,7 +25,7 @@ Drag the title bar, or the damage and DPS numbers, to move the window. Drag the 
 
 Damage, Healing, Boss, Taken, and Party are the buttons under the title. Damage includes kills per spell. Healing is health actually restored. Boss is the last boss fight, and it stays up until the next boss. Taken is the damage you took, split by what hit you. Party shows each hero's damage, and only while you are in co-op. Hover a hero's strongest spell to see what it does. The name is in your language. Spell icons and grouped talents still work when a partner plays in another language. DPS looks back 10 seconds unless you change that in settings. A thin bar under a spell icon is its cooldown. Hover a spell for its hits and crits. Hover the total for your build stats.
 
-The gear on the title bar opens settings: scale, opacity, background, the DPS window, columns, colors, cooldown bars, and lock. Share is that spell's part of the total. Under the spell adds an arrow that lists the talents grouped into a spell. Wrap names splits a long name onto a second line, and it is off until you turn it on. Since the start there uses the average for the whole run, or the whole boss fight. Right-click the bubble for the same window. Reset settings there puts those back. Your numbers and window positions stay.
+The gear on the title bar opens settings: scale, opacity, background, the DPS window, columns, colors, cooldown bars, and lock. Share is that spell's part of the total. Each spell alone lists every spell, talent, and item on its own row, as Damage Done does. A proc is the spell it casts, so that row has no kill count. Under the spell adds an arrow that lists the talents grouped into a spell. Wrap names splits a long name onto a second line, and it is off until you turn it on. Since the start there uses the average for the whole run, or the whole boss fight. Right-click the bubble for the same window. Reset settings there puts those back. Your numbers and window positions stay.
 
 Right-click a button to open that view in its own window. The button stays, dimmed. Click it, or the x on the extra window, to bring the view back. Each view is only in one place. The extra window has its own size, position, and Reset.
 
@@ -45,6 +42,14 @@ While the main window, its bubble, or an extra window is open, the built-in Dama
 The window position is remembered across updates. Deleting the addon folder does not clear it. If the window is missing, type `/azsm resetpos`.
 
 ## Changelog
+
+### 1.32
+
+Tested with game 0.113.3.
+
+- Each spell alone lists every spell, talent, and item on its own row, as Damage Done does.
+- A proc in that list has no kill count, because a proc is the spell it casts.
+- Settings are split into Window, DPS, Rows, Columns, and Colors.
 
 ### 1.31
 

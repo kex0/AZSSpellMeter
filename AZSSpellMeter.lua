@@ -2096,9 +2096,10 @@ local function rebuild(mode)
 	end
 	-- Fold a proc into the spell it actually casts: one Pyroblast row, and Hot
 	-- Streak lives on the proc button. Several casts share the proc. Collect
-	-- first; pairs cannot drop keys.
+	-- first; pairs cannot drop keys. "Each spell alone" leaves the meter's own rows.
 	local merges = {}
 	local procName, row
+	if not (config().look and config().look.flat) then
 	for procName, row in pairs(bucket) do
 		if mode ~= "party" and (row.proc or PROC_CAST[englishSpell(procName)] or string.find(procName, ": ", 1, true)) then
 			local parents = anchorSpells(procName, bucket)
@@ -2175,6 +2176,7 @@ local function rebuild(mode)
 			bucket[link.proc] = nil
 		end
 	end
+	end
 	local n = 0
 	local name, entry
 	for name, entry in pairs(bucket) do
@@ -2186,8 +2188,30 @@ local function rebuild(mode)
 			keep = true
 		end
 		if keep then
-			if entry.proc and not entry.procs then
-				entry.cast = castList(name)
+			-- A proc is the spell it casts. Its kills belong to that spell, so a
+			-- separate row has no kill count of its own.
+			if not entry.procs and (entry.proc or PROC_CAST[englishSpell(name)]) then
+				if not entry.cast then
+					entry.cast = castList(name)
+				end
+				if config().look and config().look.flat then
+					entry.noKill = true
+				end
+			elseif not entry.procs and string.find(name, ": ", 1, true) then
+				local enSpell = englishSpell(name)
+				local knownSpell = (AZSSpellMeterIcon and (AZSSpellMeterIcon[name] or (enSpell and AZSSpellMeterIcon[enSpell])))
+					or EXTRA_ICONS[name] or (enSpell and EXTRA_ICONS[enSpell])
+				if not knownSpell then
+					if not entry.cast then
+						local _, _, castSpell = string.find(name, ": (.+)$")
+						if castSpell and castSpell ~= "" then
+							entry.cast = clientSpell(castSpell)
+						end
+					end
+					if config().look and config().look.flat then
+						entry.noKill = true
+					end
+				end
 			end
 			n = n + 1
 			sorted[n] = entry
@@ -2944,7 +2968,7 @@ local function refreshWindow(win)
 			else
 				row.name:SetTextColor(1, 0.95, 0.86)
 			end
-			if showKill and not data.child and (data.kills or 0) > 0 then
+			if showKill and not data.child and not data.noKill and (data.kills or 0) > 0 then
 				row.kills:SetText(tostring(data.kills))
 			else
 				row.kills:SetText("")
@@ -4059,7 +4083,7 @@ local function createRow(parent, index)
 				{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
 				{ string.format("%s %s", rateWord, fmtRate(data.dps or 0)), 0.7, 0.92, 0.68 },
 			}
-			if killView and not isProc(data.proc) and not data.cast then
+			if killView and not data.noKill and not data.child and not isProc(data.proc) and not data.cast then
 				table.insert(lines, { string.format("Kills %d", data.kills or 0), 1, 0.82, 0.45 })
 			end
 			local landed = data.hits or 0
@@ -4083,6 +4107,9 @@ local function createRow(parent, index)
 					into = "Grouped into " .. data.parentName .. "."
 				end
 				table.insert(lines, { into, 0.65, 0.78, 1 })
+				if killView and data.parentName and data.parentName ~= "" then
+					table.insert(lines, { "Kills for this are counted on " .. data.parentName .. ".", 0.75, 0.75, 0.75 })
+				end
 			elseif data.procs and data.procs[1] then
 				local text = data.procs[1].name
 				local pi
@@ -4092,8 +4119,15 @@ local function createRow(parent, index)
 				table.insert(lines, { "Includes " .. text, 0.65, 0.78, 1 })
 			elseif data.cast then
 				table.insert(lines, { "Cast as " .. data.cast, 0.85, 0.8, 0.7 })
-			elseif isProc(data.proc) then
-				table.insert(lines, { "Proc.", 0.7, 0.7, 0.7 })
+				if data.noKill and killView then
+					table.insert(lines, { "Kills for this are counted on " .. data.cast .. ".", 0.75, 0.75, 0.75 })
+				end
+			elseif isProc(data.proc) or data.noKill then
+				if data.noKill and killView then
+					table.insert(lines, { "This casts another spell, so its kills are counted on that spell.", 0.75, 0.75, 0.75 })
+				else
+					table.insert(lines, { "Proc.", 0.7, 0.7, 0.7 })
+				end
 			end
 			local tipIcon = nil
 			if not data.classKey then
@@ -5038,7 +5072,7 @@ local function buildSettings()
 	local box = CreateFrame("Frame", "AZSSpellMeterSettings", UIParent)
 	settings = box
 	box:SetWidth(248)
-	box:SetHeight(552)
+	box:SetHeight(640)
 	box:SetFrameStrata("DIALOG")
 	box:SetMovable(true)
 	box:EnableMouse(true)
@@ -5197,23 +5231,29 @@ local function buildSettings()
 		end
 	end
 
-	local scaleSlider, scaleValue = makeSlider(-30, "Scale", 70, 150, 5)
+	local scaleSlider, scaleValue = makeSlider(-46, "Scale", 70, 150, 5)
 	box.scaleSlider = scaleSlider
 	box.scaleValue = scaleValue
-	local fadeSlider, fadeValue = makeSlider(-66, "Opacity", 0, 100, 1)
+	local fadeSlider, fadeValue = makeSlider(-82, "Opacity", 0, 100, 1)
 	box.fadeSlider = fadeSlider
 	box.fadeValue = fadeValue
-	local opSlider, opValue = makeSlider(-102, "Background", 0, 100, 1)
+	local opSlider, opValue = makeSlider(-118, "Background", 0, 100, 1)
 	box.opSlider = opSlider
 	box.opValue = opValue
-	local dpsSlider, dpsValue, dpsName = makeSlider(-138, "DPS window", 5, 120, 5)
+	local dpsSlider, dpsValue, dpsName = makeSlider(-202, "DPS window", 5, 120, 5)
 	box.dpsSlider = dpsSlider
 	box.dpsValue = dpsValue
 
-	local function makeCheck(y, text)
+	local function makeCheck(y, text, x, w)
+		if not x then
+			x = 12
+		end
+		if not w then
+			w = 220
+		end
 		local hit = CreateFrame("Button", nil, box)
-		hit:SetPoint("TOPLEFT", box, "TOPLEFT", 12, y)
-		hit:SetWidth(220)
+		hit:SetPoint("TOPLEFT", box, "TOPLEFT", x, y)
+		hit:SetWidth(w)
 		hit:SetHeight(16)
 		local square = CreateFrame("Frame", nil, hit)
 		square:SetPoint("LEFT", hit, "LEFT", 0, 0)
@@ -5235,35 +5275,44 @@ local function buildSettings()
 		face(label, 10)
 		label:SetTextColor(0.9, 0.84, 0.68)
 		hit.mark = mark
+		hit.label = label
 		return hit
 	end
 
-	local dpsAllHit = makeCheck(-174, "Since the start")
-	box.dpsAllMark = dpsAllHit.mark
-	local cdHit = makeCheck(-192, "Cooldown bars")
-	box.cdMark = cdHit.mark
-	local lockHit = makeCheck(-210, "Lock windows")
+	local function sectionTitle(y, text)
+		local label = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		label:SetPoint("TOPLEFT", box, "TOPLEFT", 12, y)
+		label:SetText(text)
+		face(label, 10)
+		label:SetTextColor(1, 0.9, 0.62)
+		return label
+	end
+
+	sectionTitle(-28, "Window")
+	local lockHit = makeCheck(-158, "Lock windows")
 	box.lockMark = lockHit.mark
-	local detailHit = makeCheck(-228, "Under the spell")
+
+	sectionTitle(-184, "DPS")
+	local dpsAllHit = makeCheck(-240, "Since the start")
+	box.dpsAllMark = dpsAllHit.mark
+
+	sectionTitle(-266, "Rows")
+	local flatHit = makeCheck(-284, "Each spell alone")
+	box.flatMark = flatHit.mark
+	local detailHit = makeCheck(-302, "Under the spell")
 	box.detailMark = detailHit.mark
-	local wrapHit = makeCheck(-246, "Wrap names")
+	local wrapHit = makeCheck(-320, "Wrap names")
 	box.wrapMark = wrapHit.mark
+	local cdHit = makeCheck(-338, "Cooldown bars")
+	box.cdMark = cdHit.mark
 
-	local columns = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	columns:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -268)
-	columns:SetText("Columns")
-	face(columns, 10)
-	columns:SetTextColor(1, 0.9, 0.62)
-	local colKillHit = makeCheck(-284, "Kills")
-	local colDmgHit = makeCheck(-302, "Damage")
-	local colShareHit = makeCheck(-320, "Share")
-	local colDpsHit = makeCheck(-338, "DPS")
+	sectionTitle(-368, "Columns")
+	local colKillHit = makeCheck(-386, "Kills", 12, 110)
+	local colDmgHit = makeCheck(-386, "Damage", 124, 110)
+	local colShareHit = makeCheck(-404, "Share", 12, 110)
+	local colDpsHit = makeCheck(-404, "DPS", 124, 110)
 
-	local colors = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	colors:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -362)
-	colors:SetText("Colors")
-	face(colors, 10)
-	colors:SetTextColor(1, 0.9, 0.62)
+	sectionTitle(-426, "Colors")
 
 	local picks = {
 		{ key = "panel", name = "Window", tip = "Background of the meter windows." },
@@ -5284,7 +5333,7 @@ local function buildSettings()
 		local b = CreateFrame("Button", nil, box)
 		b:SetWidth(sw)
 		b:SetHeight(sw)
-		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -378)
+		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -444)
 		b:SetBackdrop(roundBackdrop(8))
 		b.key = spec.key
 		b.pickName = spec.name
@@ -5306,15 +5355,15 @@ local function buildSettings()
 	end
 
 	local caption = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -406)
+	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -472)
 	caption:SetText("Window")
 	face(caption, 10)
 	caption:SetTextColor(1, 0.9, 0.62)
 	box.caption = caption
 
-	local redSlider, redValue, redName = makeSlider(-424, "Red", 0, 255, 1)
-	local greenSlider, greenValue, greenName = makeSlider(-456, "Green", 0, 255, 1)
-	local blueSlider, blueValue, blueName = makeSlider(-488, "Blue", 0, 255, 1)
+	local redSlider, redValue, redName = makeSlider(-490, "Red", 0, 255, 1)
+	local greenSlider, greenValue, greenName = makeSlider(-522, "Green", 0, 255, 1)
+	local blueSlider, blueValue, blueName = makeSlider(-554, "Blue", 0, 255, 1)
 	redName:SetTextColor(1, 0.55, 0.45)
 	greenName:SetTextColor(0.55, 0.9, 0.55)
 	blueName:SetTextColor(0.55, 0.75, 1)
@@ -5382,10 +5431,18 @@ local function buildSettings()
 		else
 			lockHit.mark:Hide()
 		end
-		if lookValue("detail") then
-			detailHit.mark:Show()
-		else
+		if lookValue("flat") then
+			flatHit.mark:Show()
 			detailHit.mark:Hide()
+			detailHit.label:SetTextColor(0.45, 0.4, 0.32)
+		else
+			flatHit.mark:Hide()
+			detailHit.label:SetTextColor(0.9, 0.84, 0.68)
+			if lookValue("detail") then
+				detailHit.mark:Show()
+			else
+				detailHit.mark:Hide()
+			end
 		end
 		if lookValue("wrap") then
 			wrapHit.mark:Show()
@@ -5598,7 +5655,30 @@ local function buildSettings()
 	lockHit:SetScript("OnLeave", function()
 		leaveTip()
 	end)
+	flatHit:SetScript("OnClick", function()
+		local saved = ensureLook()
+		if saved.flat then
+			saved.flat = nil
+		else
+			saved.flat = true
+		end
+		syncSettings()
+		refresh()
+	end)
+	flatHit:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "Each spell alone", nil, {
+			{ "Each spell, talent, and item stays on its own row, as Damage Done lists them.", 1, 1, 1 },
+			{ "A proc is the spell it casts, so that row has no kill count.", 0.75, 0.75, 0.75 },
+			{ "Off groups the proc into that spell, which is where the kill is counted.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	flatHit:SetScript("OnLeave", function()
+		leaveTip()
+	end)
 	detailHit:SetScript("OnClick", function()
+		if lookValue("flat") then
+			return
+		end
 		local saved = ensureLook()
 		if saved.detail then
 			saved.detail = nil
@@ -5609,6 +5689,12 @@ local function buildSettings()
 		refresh()
 	end)
 	detailHit:SetScript("OnEnter", function()
+		if lookValue("flat") then
+			showTip(this, "RIGHT", "Under the spell", nil, {
+				{ "Each spell alone is on, so nothing is grouped under another spell.", 1, 1, 1 },
+			})
+			return
+		end
 		showTip(this, "RIGHT", "Under the spell", nil, {
 			{ "An arrow on a spell opens the talents grouped into it.", 1, 1, 1 },
 			{ "Off leaves those talents as icons beside the name.", 0.75, 0.75, 0.75 },

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.32
+
+Tested with game 0.113.3.
+
+- Each spell alone lists every spell, talent, and item on its own row, as Damage Done does.
+- A proc in that list has no kill count, because a proc is the spell it casts.
+- Settings are split into Window, DPS, Rows, Columns, and Colors.
+
 ## 1.31
 
 Tested with game 0.113.3.
