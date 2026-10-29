@@ -6,7 +6,7 @@
 -- Kills are credited from the combat log on the damage view. They keep counting
 -- while another view is open, and they are not drawn there. The log names spells
 -- in English; a localized meter is joined to those kills by the spell icon.
--- DPS is a window of the run clock. It is 10 seconds unless the player picks
+-- DPS is a window of the run clock. It is 30 seconds unless the player picks
 -- another length, or the average since the start.
 -- A proc is grouped onto the spell it casts (Hot Streak onto Pyroblast). One that
 -- casts several spells is split across the ones on the meter. The row is that
@@ -103,6 +103,10 @@ local function tone(r, g, b)
 	return r + (1 - r) * 0.45, g + (1 - g) * 0.45, b + (1 - b) * 0.45
 end
 local scanAt = 0
+local spellSlot = {}
+local spellTipCache = {}
+local showTip
+local leaveTip
 local lastRaw = ""
 local lastHit = ""
 local lastBlow = {}
@@ -324,6 +328,27 @@ end
 local function beginChoice()
 	choiceHold = true
 	choiceGrace = GetTime() + 0.75
+	if frame then
+		raiseOverCards(frame)
+	end
+	if bubble and bubble:IsShown() then
+		raiseOverCards(bubble)
+	end
+	local mode, pop
+	for mode, pop in pairs(popped) do
+		if pop:IsShown() then
+			raiseOverCards(pop)
+		end
+	end
+	local gMode, gBox
+	for gMode, gBox in pairs(graphBoxes) do
+		if gBox and gBox:IsShown() then
+			raiseOverCards(gBox)
+		end
+	end
+	if settings and settings:IsShown() then
+		raiseOverCards(settings)
+	end
 	if GetPlayerMapPosition then
 		holdX, holdY = GetPlayerMapPosition("player")
 		if holdX == 0 and holdY == 0 then
@@ -474,17 +499,17 @@ local function petAttacker(name)
 end
 
 local function parsePet(msg, melee)
-	local _, _, spell, victim, amount = string.find(msg, "^.+'s (.+) crits (.+) for (%d+)")
-	if spell then
-		return cleanName(spell), amount, true, cleanName(victim)
+	local _, _, owner, spell, victim, amount = string.find(msg, "^(.+)'s (.+) crits (.+) for (%d+)")
+	if owner and spell then
+		return petAttacker(owner), amount, true, cleanName(victim)
 	end
-	_, _, spell, victim, amount = string.find(msg, "^.+'s (.+) hits (.+) for (%d+)")
-	if spell then
-		return cleanName(spell), amount, false, cleanName(victim)
+	_, _, owner, spell, victim, amount = string.find(msg, "^(.+)'s (.+) hits (.+) for (%d+)")
+	if owner and spell then
+		return petAttacker(owner), amount, false, cleanName(victim)
 	end
-	_, _, spell, victim, amount = string.find(msg, "^.+'s (.+) causes (.+) (%d+)")
-	if spell then
-		return cleanName(spell), amount, false, cleanName(victim)
+	_, _, owner, spell, victim, amount = string.find(msg, "^(.+)'s (.+) causes (.+) (%d+)")
+	if owner and spell then
+		return petAttacker(owner), amount, false, cleanName(victim)
 	end
 	if melee then
 		local attacker
@@ -516,6 +541,13 @@ local function note(spell, amount, crit, victim)
 	row.hits = (row.hits or 0) + 1
 	if crit then
 		row.crits = (row.crits or 0) + 1
+		local hit = tonumber(amount) or 0
+		if hit > (row.best or 0) then
+			row.best = hit
+		end
+		if hit > (state.best or 0) then
+			state.best = hit
+		end
 	end
 	return true
 	end
@@ -562,6 +594,88 @@ local function note(spell, amount, crit, victim)
 end
 
 local rateHist = {}
+graphBoxes = {}
+
+-- Graph helpers stay global so the main chunk stays under Lua 5.0's local cap.
+function graphSlot(mode)
+	local saved = config().look
+	if not saved then
+		config().look = {}
+		saved = config().look
+	end
+	if not saved.graphs then
+		saved.graphs = {}
+		-- Older saves used a single boolean for the damage graph.
+		if saved.graph then
+			saved.graphs.damage = true
+			saved.graph = nil
+		end
+	end
+	if not saved.graphBy then
+		saved.graphBy = {}
+	end
+	return saved
+end
+
+function isGraphOpen(mode)
+	local saved = graphSlot(mode)
+	return saved.graphs[mode] and true or false
+end
+
+function setGraphOpen(mode, open)
+	local saved = graphSlot(mode)
+	if open then
+		saved.graphs[mode] = true
+	else
+		saved.graphs[mode] = nil
+	end
+	saved.graph = nil
+end
+
+function anyGraphOpen()
+	local saved = graphSlot("damage")
+	local mode, on
+	for mode, on in pairs(saved.graphs) do
+		if on then
+			return true
+		end
+	end
+	return false
+end
+
+function saveGraphSlot(box)
+	if not box then
+		return
+	end
+	local mode = box.graphMode or box.mode or "damage"
+	local saved = graphSlot(mode)
+	local point, _, rel, x, y = box:GetPoint(1)
+	local slot = saved.graphBy[mode]
+	if not slot then
+		slot = {}
+		saved.graphBy[mode] = slot
+	end
+	slot.point = point
+	slot.rel = rel
+	slot.x = x
+	slot.y = y
+	slot.w = box:GetWidth()
+	slot.h = box:GetHeight()
+	if box.compact then
+		slot.compact = true
+	else
+		slot.compact = nil
+	end
+	-- Keep legacy keys filled from the damage graph for old settings paths.
+	if mode == "damage" then
+		saved.graphPoint = point
+		saved.graphRel = rel
+		saved.graphX = x
+		saved.graphY = y
+		saved.graphW = slot.w
+		saved.graphH = slot.h
+	end
+end
 
 local function clearRecentRate(mode)
 	if not mode then
@@ -571,7 +685,7 @@ local function clearRecentRate(mode)
 	rateHist[mode] = nil
 end
 
--- Seconds of run time DPS looks back. Nil in saved settings means 10.
+-- Seconds of run time DPS looks back. Nil in saved settings means 30.
 -- dpsAll uses the meter's own average instead, which is the whole run,
 -- or the time since Reset on a view that was reset.
 local function rateSeconds()
@@ -584,7 +698,7 @@ local function rateSeconds()
 		n = tonumber(saved.dps)
 	end
 	if not n or n < 5 then
-		return 10
+		return 30
 	end
 	if n > 120 then
 		return 120
@@ -596,47 +710,106 @@ end
 -- The first second keeps the meter's own average so the number does not spike.
 local function recentRate(mode, now, total, bucket)
 	local window = rateSeconds()
-	if window < 5 then
-		return nil
-	end
 	if not mode or mode == "" then
 		return nil
 	end
 	if not now or now < 0 then
 		now = 0
 	end
+	total = total or 0
 	local hist = rateHist[mode]
 	if not hist then
 		hist = {}
 		rateHist[mode] = hist
 	end
 	local n = table.getn(hist)
-	if n > 0 and hist[n].t > now + 0.05 then
-		hist = {}
-		rateHist[mode] = hist
-		n = 0
-	end
 	local last = nil
 	if n > 0 then
 		last = hist[n]
 	end
-	if not last or (now - last.t) >= 0.25 then
+	-- "Again" after death often resets the built-in meter without rewinding the
+	-- run clock. Old samples then sit above the new total and force DPS to 0.
+	if last and (last.total or 0) > 0 and total + 1 < (last.total or 0) * 0.5 then
+		hist = {}
+		rateHist[mode] = hist
+		n = 0
+		last = nil
+	end
+	-- A small clock stutter (level-up cards) should not wipe the graph. A real
+	-- rewind leaves old samples in the future; keeping them makes DPS stay at 0
+	-- until the new clock catches up, so drop the trail and start again.
+	local clockBack = last and ((now + 0.05) < (last.t or 0))
+	if clockBack then
+		local gap = (last.t or 0) - now
+		if gap > 2 then
+			hist = {}
+			rateHist[mode] = hist
+			n = 0
+			last = nil
+			clockBack = false
+		end
+	end
+	-- Keep the whole run for the graph. Thin older samples when the list grows large.
+	-- Also sample when the total moves, even if the run clock is briefly stuck.
+	local totalMoved = last and math.abs(total - (last.total or 0)) >= 1
+	if not clockBack and (not last or (now - last.t) >= 0.25 or totalMoved) then
+		-- Anchor a zero so a burst that lands before the first sample still rates.
+		if n < 1 then
+			hist[1] = { t = now, total = 0, spells = {} }
+			n = 1
+			last = hist[1]
+		end
 		local snap = { t = now, total = total, spells = {} }
 		local name, row
 		for name, row in pairs(bucket) do
 			snap.spells[name] = row.damage or 0
 		end
-		table.insert(hist, snap)
+		-- Same clock stamp as the last sample: replace it so the trail stays tight.
+		-- Do not replace a zero anchor with live damage on the same stamp.
+		if last and (now - (last.t or 0)) < 0.05 then
+			if (last.total or 0) <= 0 and total > 0 then
+				snap.t = (last.t or now) + 0.05
+				table.insert(hist, snap)
+				n = n + 1
+			else
+				hist[n] = snap
+			end
+		else
+			table.insert(hist, snap)
+			n = n + 1
+		end
+		if n > 1600 then
+			local thin = {}
+			local ti
+			for ti = 1, n, 2 do
+				thin[table.getn(thin) + 1] = hist[ti]
+			end
+			rateHist[mode] = thin
+			hist = thin
+			n = table.getn(hist)
+		end
 	end
-	while table.getn(hist) > 0 and (now - hist[1].t) > window do
-		table.remove(hist, 1)
-	end
-	local base = hist[1]
-	if not base then
+	if window < 5 then
 		return nil
 	end
-	local span = now - base.t
-	if span < 1 then
+	if n < 1 then
+		return nil
+	end
+	local target = now - window
+	local base = hist[1]
+	local bi
+	for bi = 1, n do
+		if (hist[bi].t or 0) <= target then
+			base = hist[bi]
+		else
+			break
+		end
+	end
+	local span = now - (base.t or 0)
+	if span < 0.05 then
+		span = 0.05
+	end
+	if span < 1 and total <= (base.total or 0) then
 		return nil
 	end
 	if span > window then
@@ -717,6 +890,7 @@ local function resetData()
 	state.spells = {}
 	state.total = 0
 	state.kills = 0
+	state.best = nil
 	state.elapsed = 0
 	state.anchor = nil
 	state.base = nil
@@ -865,6 +1039,9 @@ local PROC_CAST = {
 	["Leader of the Pack"] = { "Swipe" },
 	["Nature's Grasp"] = { "Entangling Roots" },
 	["Sweeping Strikes"] = { "Cleave", "Mortal Strike", "Execute" },
+	["Choker of the Fire Lord"] = { "Blast Wave" },
+	["The Eye of Hakkar"] = { "Ignite" },
+	["Corpse Explosion"] = { "Seed of Corruption" },
 }
 
 -- Custom talents are not in Spell.dbc, so the generated icon list has no row for them.
@@ -1119,6 +1296,9 @@ local function noteItemText(msg)
 		if path and shown and shown ~= "" then
 			keepIcon(shown, path)
 		end
+		if shown and shown ~= "" and not spellSlot[shown] then
+			spellSlot[shown] = { "item:" .. body, nil, "item" }
+		end
 		start = e + 1
 	end
 end
@@ -1132,6 +1312,9 @@ local function scanCarriedItems()
 			if link and tex then
 				local _, _, name = string.find(link, "%[(.+)%]")
 				keepIcon(name, tex)
+				if name and name ~= "" and not spellSlot[name] then
+					spellSlot[name] = { link, nil, "item" }
+				end
 			end
 		end
 	end
@@ -1146,6 +1329,9 @@ local function scanCarriedItems()
 				if link and tex then
 					local _, _, name = string.find(link, "%[(.+)%]")
 					keepIcon(name, tex)
+					if name and name ~= "" and not spellSlot[name] then
+						spellSlot[name] = { link, nil, "item" }
+					end
 				end
 			end
 		end
@@ -1221,17 +1407,29 @@ end
 
 local scanTip
 local scanTipMissing
-local spellSlot = {}
-local spellTipCache = {}
+local scanTipParent
 
 local function actionTip()
 	if scanTip or scanTipMissing then
 		return scanTip
 	end
-	local ok, tip = pcall(CreateFrame, "GameTooltip", "AZSSpellMeterScanTip", UIParent, "GameTooltipTemplate")
-	if not ok or not tip or not tip.SetOwner or not tip.SetAction then
+	-- Hidden parent keeps the reader invisible; SetAlpha(0) can leave lines blank
+	-- on this client after SetSpell / SetAction.
+	if not scanTipParent then
+		scanTipParent = CreateFrame("Frame", "AZSSpellMeterScanTipParent", UIParent)
+		scanTipParent:Hide()
+	end
+	local ok, tip = pcall(CreateFrame, "GameTooltip", "AZSSpellMeterScanTip", scanTipParent, "GameTooltipTemplate")
+	if not ok or not tip or not tip.SetOwner then
 		scanTipMissing = true
 		return nil
+	end
+	if not tip.SetSpell and not tip.SetAction and not tip.SetTalent then
+		scanTipMissing = true
+		return nil
+	end
+	if tip.EnableMouse then
+		tip:EnableMouse(false)
 	end
 	scanTip = tip
 	return tip
@@ -1318,24 +1516,29 @@ local function scanIcons()
 	end
 	scanCarriedItems()
 	local tip = actionTip()
-	if not tip or not HasAction or not GetActionTexture then
+	if not tip or not HasAction or not GetActionTexture or not tip.SetAction then
 		return
 	end
 	tip:SetOwner(UIParent, "ANCHOR_NONE")
-	tip:SetAlpha(0)
 	for slot = 1, 120 do
 		if HasAction(slot) then
+			if tip.ClearLines then
+				tip:ClearLines()
+			end
 			local ok = pcall(tip.SetAction, tip, slot)
 			if ok then
 				local line = getglobal("AZSSpellMeterScanTipTextLeft1")
-				if line then
-					rememberIcon(line:GetText(), GetActionTexture(slot))
+				local actionName = line and line:GetText()
+				if actionName and actionName ~= "" then
+					rememberIcon(actionName, GetActionTexture(slot))
+					if not spellSlot[actionName] then
+						spellSlot[actionName] = { slot, nil, "action" }
+					end
 				end
 			end
 		end
 	end
 	tip:Hide()
-	tip:SetAlpha(1)
 end
 
 -- Lines from the local hero's own build. A party spell should not show them.
@@ -1413,26 +1616,58 @@ end
 -- Rank, cost, cast time, and what the spell does, from the game's own tooltip.
 -- Talents and spells this hero knows are read directly. A party spell in another
 -- language is matched back to that entry when the game has a translation for it.
-local function spellTipLines(name)
+local function spellTipLines(name, full)
 	if not name or name == "" then
 		return nil
 	end
-	local cached = spellTipCache[name]
+	local cacheKey = name
+	if full then
+		cacheKey = "full:" .. name
+	end
+	local cached = spellTipCache[cacheKey]
 	if cached then
 		return cached
 	end
-	local slot = spellSlot[name]
-	local key = name
-	if AZSSpellMeterName and AZSSpellMeterName[name] and AZSSpellMeterName[name] ~= "" then
-		key = AZSSpellMeterName[name]
-	end
-	if not slot then
-		slot = spellSlot[key]
+	local key = englishSpell(name) or name
+	local spoken = clientSpell(name)
+	local slot = spellSlot[name] or spellSlot[key] or spellSlot[spoken]
+	if not slot and spellSay then
+		local said = spellSay[key] or spellSay[name] or spellSay[spoken]
+		if said then
+			slot = spellSlot[said]
+		end
 	end
 	if not slot then
 		local casts = PROC_CAST[key]
 		if casts and casts[1] and casts[1] ~= key then
-			slot = spellSlot[casts[1]]
+			slot = spellSlot[casts[1]] or spellSlot[clientSpell(casts[1])]
+		end
+	end
+	-- Last try: walk the spellbook. Prefer the last matching rank.
+	if not slot and GetSpellName then
+		local book = BOOKTYPE_SPELL or "spell"
+		local i = 1
+		local found
+		while true do
+			local spellName = GetSpellName(i, book)
+			if not spellName then
+				break
+			end
+			if spellName == name or spellName == key or spellName == spoken or englishSpell(spellName) == key then
+				found = { i, book }
+				spellSlot[spellName] = found
+			end
+			i = i + 1
+		end
+		if found then
+			slot = found
+			spellSlot[name] = slot
+			if key ~= name then
+				spellSlot[key] = slot
+			end
+			if spoken and spoken ~= name then
+				spellSlot[spoken] = slot
+			end
 		end
 	end
 	if not slot then
@@ -1443,46 +1678,78 @@ local function spellTipLines(name)
 		return nil
 	end
 	tip:SetOwner(UIParent, "ANCHOR_NONE")
-	tip:SetAlpha(0)
+	if tip.ClearLines then
+		tip:ClearLines()
+	end
+	tip:Show()
 	local ok
 	if slot[3] == "talent" then
 		if not tip.SetTalent then
 			tip:Hide()
-			tip:SetAlpha(1)
 			return nil
 		end
 		ok = pcall(tip.SetTalent, tip, slot[1], slot[2])
+	elseif slot[3] == "action" then
+		if not tip.SetAction then
+			tip:Hide()
+			return nil
+		end
+		ok = pcall(tip.SetAction, tip, slot[1])
+	elseif slot[3] == "item" then
+		if not tip.SetHyperlink then
+			tip:Hide()
+			return nil
+		end
+		ok = pcall(tip.SetHyperlink, tip, slot[1])
 	else
 		if not tip.SetSpell then
 			tip:Hide()
-			tip:SetAlpha(1)
 			return nil
 		end
-		ok = pcall(tip.SetSpell, tip, slot[1], slot[2])
+		ok = pcall(tip.SetSpell, tip, slot[1], slot[2] or BOOKTYPE_SPELL or "spell")
 	end
 	if not ok then
 		tip:Hide()
-		tip:SetAlpha(1)
 		return nil
 	end
 	local lines = {}
+	local limit = 12
+	if tip.NumLines then
+		limit = tip:NumLines() or 12
+		if limit > 12 then
+			limit = 12
+		elseif limit < 1 then
+			limit = 12
+		end
+	end
 	local i = 1
-	while i <= 12 do
+	while i <= limit do
 		local left = getglobal("AZSSpellMeterScanTipTextLeft" .. i)
 		local text = left and left:GetText()
-		if not text or text == "" then
+		if (not text or text == "") and i > 1 then
 			break
 		end
 		local right = getglobal("AZSSpellMeterScanTipTextRight" .. i)
 		local side = right and right:GetText()
 		if i == 1 then
-			text = side
+			-- Title is already the meter tip header; keep rank / drop the name.
+			if side and side ~= "" then
+				text = side
+			elseif text == name or text == key or text == spoken then
+				text = nil
+			end
 		elseif side and side ~= "" then
-			text = text .. "  " .. side
+			text = (text or "") .. "  " .. side
 		end
-		if text and text ~= "" and not partyTipSkip(text) then
+		local drop = false
+		if not text or text == "" then
+			drop = true
+		elseif not full and partyTipSkip(text) then
+			drop = true
+		end
+		if not drop then
 			local r, g, b = 1, 1, 1
-			if left.GetTextColor then
+			if left and left.GetTextColor then
 				r, g, b = left:GetTextColor()
 			end
 			lines[table.getn(lines) + 1] = { text, r or 1, g or 1, b or 1 }
@@ -1490,11 +1757,10 @@ local function spellTipLines(name)
 		i = i + 1
 	end
 	tip:Hide()
-	tip:SetAlpha(1)
 	if table.getn(lines) < 1 then
 		return nil
 	end
-	spellTipCache[name] = lines
+	spellTipCache[cacheKey] = lines
 	return lines
 end
 
@@ -1565,7 +1831,17 @@ local function watchRun()
 	if not t then
 		return
 	end
-	if runSeen and t + 1 < runSeen and ((state.kills or 0) > 0 or state.base or state.healBase or state.bossBase or state.takenBase or state.partyBase) then
+	-- Level-up and item cards can make the clock stutter. Hold the highest
+	-- time seen while a card is up so a dip is not treated as a new run.
+	if choiceHold then
+		if not runSeen or t > runSeen then
+			runSeen = t
+		end
+		return
+	end
+	-- A real new run starts near zero. A mid-run dip (cards, pause) must not
+	-- wipe the meter or the DPS graph.
+	if runSeen and t + 1 < runSeen and t < 8 and ((state.kills or 0) > 0 or state.base or state.healBase or state.bossBase or state.takenBase or state.partyBase) then
 		state.spells = {}
 		state.kills = 0
 		lastBlow = {}
@@ -1585,6 +1861,16 @@ local function watchRun()
 		state.partyBaseTotal = nil
 		state.partyBaseTime = nil
 		clearColHold()
+		clearRecentRate()
+		local gMode, graph
+		for gMode, graph in pairs(graphBoxes) do
+			graph.viewStart = nil
+			graph.viewSpan = nil
+			graph.follow = false
+			graph.lockFull = false
+			graph.axisMax = nil
+			graph.graphLive = false
+		end
 		say("New run.")
 	end
 	runSeen = t
@@ -1775,6 +2061,11 @@ local function windowReset(dropTest, mode)
 	end
 	captureBase(mode)
 	clearRecentRate(mode)
+	-- Zero sample at the reset moment so the DPS window measures from here,
+	-- not from a blank history that waits on the next combat tick.
+	local hist = {}
+	rateHist[mode] = hist
+	hist[1] = { t = runNow(), total = 0, spells = {} }
 	clearColHold(mode)
 	if showsKills(mode) then
 		state.spells = {}
@@ -1892,11 +2183,15 @@ local function rebuild(mode)
 	local bKey, tKey, timeKey = baseFields(mode)
 	local baseMap = state[bKey]
 	if baseMap and gameTotal + 1 < (state[tKey] or 0) then
+		local was = state[tKey] or 0
 		state[bKey] = nil
 		state[tKey] = nil
 		state[timeKey] = nil
 		baseMap = nil
-		clearRecentRate(mode)
+		-- A big drop is "Again" / a new attempt. A tiny dip is a level-up card.
+		if was > 0 and gameTotal < was * 0.5 then
+			clearRecentRate(mode)
+		end
 	end
 	local since = 1
 	if baseMap then
@@ -1911,7 +2206,18 @@ local function rebuild(mode)
 		meterDps = meterTotal / since
 	else
 		meterTotal = gameTotal
-		meterDps = tonumber(rdps) or 0
+		-- The built-in meter often reports 0 DPS right after a run reset even
+		-- while totals are climbing. Prefer total / run time until the window
+		-- samples catch up.
+		local t = runNow()
+		if t < 1 then
+			t = 1
+		end
+		meterDps = meterTotal / t
+		local gameRate = tonumber(rdps) or 0
+		if gameRate > meterDps then
+			meterDps = gameRate
+		end
 	end
 	local bucket = {}
 	local function bucketOf(name)
@@ -1922,11 +2228,13 @@ local function rebuild(mode)
 		local kills = 0
 		local hits = 0
 		local crits = 0
+		local best = 0
 		local rec = state.spells[name]
 		if rec then
 			kills = rec.kills or 0
 			hits = rec.hits or 0
 			crits = rec.crits or 0
+			best = rec.best or 0
 		end
 		row = {
 			name = name,
@@ -1936,6 +2244,7 @@ local function rebuild(mode)
 			kills = kills,
 			hits = hits,
 			crits = crits,
+			best = best,
 			fromMeter = false,
 		}
 		bucket[name] = row
@@ -2011,7 +2320,15 @@ local function rebuild(mode)
 					end
 					row.dps = dealt / since
 				else
-					row.dps = tonumber(line.dps) or 0
+					local t = runNow()
+					if t < 1 then
+						t = 1
+					end
+					row.dps = dealt / t
+					local gameRate = tonumber(line.dps) or 0
+					if gameRate > row.dps then
+						row.dps = gameRate
+					end
 				end
 				row.damage = dealt
 				row.proc = isProc(line.proc)
@@ -2091,7 +2408,9 @@ local function rebuild(mode)
 		end
 	end
 	local windowRate = recentRate(mode, runNow(), meterTotal, bucket)
-	if windowRate then
+	-- 0 is a valid idle reading once the trail has a real baseline. Nil means
+	-- the window is not ready; keep the total/time average already set above.
+	if windowRate ~= nil then
 		meterDps = windowRate
 	end
 	-- Fold a proc into the spell it actually casts: one Pyroblast row, and Hot
@@ -2131,6 +2450,10 @@ local function rebuild(mode)
 				usedDmg = usedDmg + partDmg
 				usedRate = usedRate + partRate
 				local parent = bucketOf(parents[pi])
+				if parent.own == nil then
+					parent.own = parent.damage or 0
+					parent.ownDps = parent.dps or 0
+				end
 				parent.damage = (parent.damage or 0) + partDmg
 				parent.dps = (parent.dps or 0) + partRate
 				if pi == 1 then
@@ -2176,6 +2499,68 @@ local function rebuild(mode)
 			bucket[link.proc] = nil
 		end
 	end
+	end
+	local summonKey = {
+		["Imp"] = true,
+		["Felhunter"] = true,
+		["Voidwalker"] = true,
+		["Succubus"] = true,
+		["Felguard"] = true,
+		["Infernal"] = true,
+		["Doomguard"] = true,
+		["Pit Lord"] = true,
+		["Wolf"] = true,
+		["Raptor"] = true,
+		["Spirit Wolf"] = true,
+		["Treant"] = true,
+		["Water Elemental"] = true,
+	}
+	local members = {}
+	local memberCount = 0
+	local summonName, summonRow
+	for summonName, summonRow in pairs(bucket) do
+		local summonEn = englishSpell(summonName)
+		if summonKey[summonEn] or summonKey[summonName] then
+			memberCount = memberCount + 1
+			members[memberCount] = summonName
+		end
+	end
+	if memberCount >= 2 and mode ~= "party" and not (config().look and config().look.flat) then
+		local pack = bucketOf("Pets")
+		pack.fromMeter = true
+		if not pack.iconPath then
+			local petsIcon = iconFor("Pets")
+			if petsIcon and not string.find(petsIcon, "QuestionMark", 1, true) then
+				pack.iconPath = petsIcon
+			end
+		end
+		local mi
+		for mi = 1, memberCount do
+			local memberName = members[mi]
+			local member = bucket[memberName]
+			if member and memberName ~= "Pets" then
+				pack.damage = (pack.damage or 0) + (member.damage or 0)
+				pack.dps = (pack.dps or 0) + (member.dps or 0)
+				pack.kills = (pack.kills or 0) + (member.kills or 0)
+				if (member.best or 0) > (pack.best or 0) then
+					pack.best = member.best
+				end
+				if not pack.procs then
+					pack.procs = {}
+				end
+				pack.procs[table.getn(pack.procs) + 1] = {
+					name = memberName,
+					damage = member.damage or 0,
+					dps = member.dps or 0,
+					kills = member.kills or 0,
+					hits = member.hits or 0,
+					crits = member.crits or 0,
+					icon = member.iconPath,
+					summon = true,
+				}
+				bucket[memberName] = nil
+			end
+		end
 	end
 	local n = 0
 	local name, entry
@@ -2257,6 +2642,22 @@ local function rebuild(mode)
 				bn = bn + 1
 				built[bn] = entry
 				if open[entry.name] and entry.procs and entry.procs[1] then
+					if (entry.own or 0) > 0 then
+						bn = bn + 1
+						built[bn] = {
+							name = entry.name,
+							damage = entry.own or 0,
+							dps = entry.ownDps or 0,
+							kills = 0,
+							hits = entry.hits or 0,
+							crits = entry.crits or 0,
+							best = entry.best or 0,
+							iconPath = entry.iconPath,
+							child = true,
+							ownSpell = true,
+							parentName = entry.name,
+						}
+					end
 					local pi
 					for pi = 1, table.getn(entry.procs) do
 						local p = entry.procs[pi]
@@ -2265,12 +2666,13 @@ local function rebuild(mode)
 							name = p.name,
 							damage = p.damage or 0,
 							dps = p.dps or 0,
-							kills = 0,
+							kills = p.kills or 0,
 							hits = p.hits or 0,
 							crits = p.crits or 0,
 							iconPath = p.icon,
 							child = true,
-							proc = true,
+							proc = not p.summon,
+							summon = p.summon,
 							parentName = entry.name,
 						}
 					end
@@ -2308,6 +2710,42 @@ local function noteDeath()
 		if bestName and best > 0 then
 			say("Downed mostly by " .. bestName .. ", " .. comma(best) .. ". The Taken tab has the rest.")
 		end
+	end
+	-- Pressing Again after death starts a new attempt. The built-in meter clears;
+	-- wipe our DPS trail and kill tally so rates are not stuck at 0.
+	if seenPhase == "dead" and ph and ph ~= "dead" then
+		clearRecentRate()
+		clearColHold()
+		if state then
+			state.spells = {}
+			state.kills = 0
+			state.base = nil
+			state.baseTotal = nil
+			state.baseTime = nil
+			state.healBase = nil
+			state.healBaseTotal = nil
+			state.healBaseTime = nil
+			state.bossBase = nil
+			state.bossBaseTotal = nil
+			state.bossBaseTime = nil
+			state.takenBase = nil
+			state.takenBaseTotal = nil
+			state.takenBaseTime = nil
+			state.partyBase = nil
+			state.partyBaseTotal = nil
+			state.partyBaseTime = nil
+		end
+		lastBlow = {}
+		local gMode, graph
+		for gMode, graph in pairs(graphBoxes) do
+			graph.axisMax = nil
+			graph.viewStart = nil
+			graph.viewSpan = 30
+			graph.follow = true
+			graph.lockFull = false
+			graph.graphLive = false
+		end
+		say("New run.")
 	end
 	seenPhase = ph
 end
@@ -2494,9 +2932,19 @@ local function refreshWindow(win)
 				win.brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
 				win.brand:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 			end
+			win.brand:Show()
+			if win.brandBack then
+				win.brandBack:Show()
+			end
+			if win.brandIcon then
+				win.brandIcon:Show()
+			end
 		end
 	end
-	win.totalText:SetTextColor(numR, numG, numB)
+	win.totalText:SetTextColor(1, 0.95, 0.75)
+	if win.dpsText then
+		win.dpsText:SetTextColor(0.78, 0.95, 0.72)
+	end
 	win.dpsText:SetText(fmtRate(dps) .. " " .. string.lower(rateWord))
 	if win.bubbleText then
 		win.bubbleText:SetText(comma(board))
@@ -2509,19 +2957,34 @@ local function refreshWindow(win)
 		end
 		bubble:SetWidth(bw)
 	end
-	if win.totalBtn and win.totalText.GetStringWidth then
+	local nowHold = GetTime()
+	if win.dpsBtn and win.dpsText and win.dpsText.GetStringWidth then
+		local dw = win.dpsText:GetStringWidth() or 24
+		if dw < 28 then
+			dw = 28
+		end
+		win.dpsBtn:SetWidth(holdWidth(win, mode, "hdrDps", dw + 8, nowHold))
+	end
+	if win.totalBtn and win.totalText and win.totalText.GetStringWidth then
 		local tw = win.totalText:GetStringWidth() or 24
 		if tw < 24 then
 			tw = 24
 		end
-		win.totalBtn:SetWidth(tw + 8)
+		win.totalBtn:SetWidth(holdWidth(win, mode, "hdrTotal", tw + 8, nowHold))
 	end
-	if win.dpsBtn and win.dpsText.GetStringWidth then
-		local dw = win.dpsText:GetStringWidth() or 24
-		if dw < 24 then
-			dw = 24
+	fitBrandTitle(win)
+	if win == frame then
+		graphSlot(mode)
+		local graphModes = { "damage", "healing", "boss", "taken", "party" }
+		local gi
+		for gi = 1, table.getn(graphModes) do
+			local gm = graphModes[gi]
+			if isGraphOpen(gm) then
+				paintDpsGraph(win, rateHist[gm], true, gm)
+			elseif graphBoxes[gm] then
+				paintDpsGraph(win, rateHist[gm], false, gm)
+			end
 		end
-		win.dpsBtn:SetWidth(dw + 8)
 	end
 	local showKill = killView and columnOn("kills")
 	local showDmg = columnOn("damage")
@@ -2723,6 +3186,9 @@ local function refreshWindow(win)
 				x = x + wide + gap
 			end
 		end
+	end
+	if win.graphBtn then
+		tintSparkIcon(win.graphBtn, isGraphOpen(mode))
 	end
 	if killView and (state.kills or 0) > 0 then
 		win.countText:SetText(state.kills .. (state.kills == 1 and " kill" or " kills"))
@@ -2968,7 +3434,7 @@ local function refreshWindow(win)
 			else
 				row.name:SetTextColor(1, 0.95, 0.86)
 			end
-			if showKill and not data.child and not data.noKill and (data.kills or 0) > 0 then
+			if showKill and not data.ownSpell and not data.noKill and (data.kills or 0) > 0 and (not data.child or (data.kills or 0) > 0) then
 				row.kills:SetText(tostring(data.kills))
 			else
 				row.kills:SetText("")
@@ -3045,7 +3511,7 @@ local function refreshWindow(win)
 			stickText(row.rate, showRate, rateW)
 			stickText(row.share, showShare, shareW)
 			stickText(row.damage, showDmg, dmgW)
-			stickText(row.kills, showKill and not data.child, killW)
+			stickText(row.kills, showKill and (not data.child or (data.kills or 0) > 0), killW)
 			local iconReserve = trailIcons(data) * 16
 			local nameRight = numW + iconReserve
 			local rankGap = 0
@@ -3220,12 +3686,72 @@ local function anyMeterShown()
 	return false
 end
 
+-- Keep a DPS/HPS trail for every view, even when that tab and the graph window
+-- are closed. The graph only draws what is already stored here.
+-- Global on purpose: this chunk is at the Lua 5.0 local limit.
+function sampleAllRates()
+	if not state then
+		return
+	end
+	local now = runNow()
+	local modes = { "damage", "healing", "boss", "taken", "party" }
+	local mi
+	for mi = 1, table.getn(modes) do
+		local mode = modes[mi]
+		local lines, total = pullMeter(mode)
+		local gameTotal = tonumber(total) or 0
+		local bKey, tKey, timeKey = baseFields(mode)
+		local baseMap = state[bKey]
+		local meterTot = gameTotal
+		if baseMap then
+			if gameTotal + 1 < (state[tKey] or 0) then
+				local was = state[tKey] or 0
+				state[bKey] = nil
+				state[tKey] = nil
+				state[timeKey] = nil
+				baseMap = nil
+				if was > 0 and gameTotal < was * 0.5 then
+					clearRecentRate(mode)
+				end
+			else
+				meterTot = gameTotal - (state[tKey] or 0)
+				if meterTot < 0 then
+					meterTot = 0
+				end
+			end
+		end
+		local bucket = {}
+		if lines then
+			local i
+			for i = 1, table.getn(lines) do
+				local line = lines[i]
+				local name = line.name
+				if name and name ~= "" then
+					local raw = tonumber(line.dmg) or 0
+					local dealt = raw
+					if baseMap then
+						dealt = raw - (baseMap[name] or 0)
+						if dealt < 0 then
+							dealt = 0
+						end
+					end
+					bucket[name] = { damage = dealt }
+				end
+			end
+		end
+		recentRate(mode, now, meterTot, bucket)
+	end
+end
+
 local function refresh()
 	if not frame or not state then
 		return
 	end
 	watchRun()
 	noteDeath()
+	-- Store every view's rate trail before painting, so opening the graph later
+	-- still has the full run with no holes.
+	sampleAllRates()
 	if anyMeterShown() then
 		hideStockMeter()
 	end
@@ -3517,6 +4043,103 @@ local function pinTopLeft()
 	frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
 end
 
+function raiseOverCards(win)
+	if not win or not AZS_SetOnTopOfScreens then
+		return
+	end
+	-- The second argument has to be true. False, or leaving it out, puts the frame back under the cards.
+	-- Do not raise the header's frame level: that leaves its child numbers behind the bar.
+	local function pin(target)
+		if target and target.GetName and target:GetName() and target:GetName() ~= "" then
+			pcall(AZS_SetOnTopOfScreens, target, true)
+		end
+	end
+	pin(win)
+	pin(win.header)
+	pin(win.brandIcon)
+	pin(win.minBtn)
+	pin(win.setBtn)
+	pin(win.resetBtn)
+	pin(win.closeBtn)
+	pin(win.graphBtn)
+	pin(win.popBtn)
+	pin(win.totalBtn)
+	pin(win.dpsBtn)
+	pin(win.rateBtn)
+	if win.tip then
+		pin(win.tip)
+	end
+	-- Graph pieces are separate named frames. Without them the hover line
+	-- and dot stay under the level-up card even when the window chrome is on top.
+	pin(win.plot)
+	pin(win.overlay)
+	pin(win.followBtn)
+	pin(win.fullBtn)
+	pin(win.compactBtn)
+	pin(win.amountBtn)
+	pin(win.metricBtn)
+	pin(win.rail)
+	pin(win.grip)
+	local head = win.header and (win.header:GetFrameLevel() or 1) or ((win:GetFrameLevel() or 1) + 1)
+	if win.brandIcon then
+		win.brandIcon:SetFrameLevel(head + 6)
+	end
+	if win.totalBtn then
+		win.totalBtn:SetFrameLevel(head + 4)
+	end
+	if win.dpsBtn then
+		win.dpsBtn:SetFrameLevel(head + 4)
+	end
+	if win.rateBtn then
+		win.rateBtn:SetFrameLevel(head + 5)
+	end
+	if win.minBtn then
+		win.minBtn:SetFrameLevel(head + 5)
+	end
+	if win.setBtn then
+		win.setBtn:SetFrameLevel(head + 5)
+	end
+	if win.resetBtn then
+		win.resetBtn:SetFrameLevel(head + 5)
+	end
+	if win.closeBtn then
+		win.closeBtn:SetFrameLevel(head + 5)
+	end
+	if win.graphBtn then
+		win.graphBtn:SetFrameLevel(head + 5)
+	end
+	if win.popBtn then
+		win.popBtn:SetFrameLevel(head + 5)
+	end
+	if win.plot then
+		local base = (win:GetFrameLevel() or 1) + 2
+		win.plot:SetFrameLevel(base)
+		if win.overlay then
+			win.overlay:SetFrameLevel(base + 6)
+		end
+		if win.rail then
+			win.rail:SetFrameLevel(base + 2)
+		end
+		if win.followBtn then
+			win.followBtn:SetFrameLevel(base + 5)
+		end
+		if win.fullBtn then
+			win.fullBtn:SetFrameLevel(base + 5)
+		end
+		if win.compactBtn then
+			win.compactBtn:SetFrameLevel(base + 5)
+		end
+		if win.amountBtn then
+			win.amountBtn:SetFrameLevel(base + 5)
+		end
+		if win.metricBtn then
+			win.metricBtn:SetFrameLevel(base + 5)
+		end
+		if win.grip then
+			win.grip:SetFrameLevel(base + 7)
+		end
+	end
+end
 local function applyShown()
 	local cfg = config()
 	if cfg.shown == false then
@@ -3530,12 +4153,17 @@ local function applyShown()
 		frame:Hide()
 		if bubble then
 			bubble:Show()
+			raiseOverCards(bubble)
 		end
 	else
 		if bubble then
 			bubble:Hide()
 		end
 		frame:Show()
+		raiseOverCards(frame)
+	end
+	if frame.tip then
+		raiseOverCards(frame.tip)
 	end
 end
 
@@ -3584,15 +4212,280 @@ local function paintMinus(parent)
 	bar:SetWidth(5)
 	bar:SetHeight(1)
 	bar:SetPoint("CENTER", parent, "CENTER", 0, 0)
+	parent.mark = bar
 end
 
 local function paintX(parent)
 	local mark = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	mark:SetPoint("CENTER", parent, "CENTER", 1, 2)
+	-- Lowercase "x" sits low in Friz; nudge up into the pill.
+	mark:SetPoint("CENTER", parent, "CENTER", 0, 1)
 	mark:SetJustifyH("CENTER")
+	mark:SetJustifyV("MIDDLE")
 	mark:SetText("x")
 	face(mark, 10)
 	mark:SetTextColor(1, 0.86, 0.5)
+	parent.mark = mark
+end
+
+-- Named holder so the class icon can be raised above level-up cards.
+function makeBrandIcon(parent, name)
+	local holder = CreateFrame("Frame", name, parent)
+	holder:SetWidth(14)
+	holder:SetHeight(14)
+	local back = holder:CreateTexture(nil, "BACKGROUND")
+	back:SetTexture(K.SOLID)
+	back:SetVertexColor(0, 0, 0, 0.55)
+	back:SetAllPoints(holder)
+	local icon = holder:CreateTexture(nil, "ARTWORK")
+	icon:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
+	icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	icon:SetWidth(12)
+	icon:SetHeight(12)
+	icon:SetPoint("CENTER", holder, "CENTER", 0, 0)
+	holder.back = back
+	holder.icon = icon
+	return holder
+end
+
+-- Tiny sparkline glyph for the header graph button (gold like Reset, with a dark outline).
+function paintSparkIcon(parent)
+	local heights = { 3, 6, 4 }
+	local i
+	-- 2+1+2+1+2 = 8 wide, centered in 14 with 3px pad.
+	local baseX = 3
+	local baseY = 3
+	parent.marks = {}
+	parent.shadows = {}
+	for i = 1, 3 do
+		local sh = parent:CreateTexture(nil, "BORDER")
+		sh:SetTexture(K.SOLID)
+		sh:SetVertexColor(0, 0, 0, 0.9)
+		sh:SetWidth(2)
+		sh:SetHeight(heights[i])
+		sh:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", baseX + (i - 1) * 3 + 1, baseY - 1)
+		parent.shadows[i] = sh
+		local t = parent:CreateTexture(nil, "OVERLAY")
+		t:SetTexture(K.SOLID)
+		t:SetVertexColor(1, 0.86, 0.5)
+		t:SetWidth(2)
+		t:SetHeight(heights[i])
+		t:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", baseX + (i - 1) * 3, baseY)
+		parent.marks[i] = t
+	end
+end
+
+function tintSparkIcon(btn, lit)
+	if not btn or not btn.marks then
+		return
+	end
+	-- Same Reset gold always; open state is only a stronger border.
+	local i
+	for i = 1, table.getn(btn.marks) do
+		btn.marks[i]:SetVertexColor(1, 0.86, 0.5)
+	end
+	if btn.SetBackdropBorderColor then
+		if lit then
+			btn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		else
+			btn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		end
+	end
+end
+
+-- Inward corner brackets: compress / compact view.
+function paintCompactIcon(parent)
+	local function stub(layer, w, h, x, y, shade)
+		local t = parent:CreateTexture(nil, layer)
+		t:SetTexture(K.SOLID)
+		if shade then
+			t:SetVertexColor(0, 0, 0, 0.9)
+		else
+			t:SetVertexColor(1, 0.86, 0.5)
+		end
+		t:SetWidth(w)
+		t:SetHeight(h)
+		t:SetPoint("CENTER", parent, "CENTER", x, y)
+		return t
+	end
+	-- hx,hy = horizontal stub; vx,vy = vertical stub (L at each corner).
+	local corners = {
+		{ -2, 3, -3, 2 },
+		{ 2, 3, 3, 2 },
+		{ -2, -3, -3, -2 },
+		{ 2, -3, 3, -2 },
+	}
+	local i
+	parent.marks = {}
+	for i = 1, 4 do
+		local c = corners[i]
+		local hx, hy, vx, vy = c[1], c[2], c[3], c[4]
+		stub("BORDER", 3, 1, hx + 1, hy - 1, true)
+		stub("BORDER", 1, 3, vx + 1, vy - 1, true)
+		local hBar = stub("OVERLAY", 3, 1, hx, hy, false)
+		stub("OVERLAY", 1, 3, vx, vy, false)
+		parent.marks[i] = hBar
+	end
+	parent.mark = parent.marks[1]
+end
+
+-- Flush header + hide rail/axes, or restore the full graph chrome.
+function applyGraphCompact(box)
+	if not box or not box.header or not box.plot then
+		return
+	end
+	local compact = box.compact and true or false
+	local header = box.header
+	local plot = box.plot
+	header:ClearAllPoints()
+	plot:ClearAllPoints()
+	if compact then
+		header:SetPoint("TOPLEFT", box, "TOPLEFT", 3, -3)
+		header:SetPoint("TOPRIGHT", box, "TOPRIGHT", -3, -3)
+		header:SetHeight(14)
+		plot:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
+		plot:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
+		plot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -3, 3)
+		box.graphMinH = 48
+		if box.rail then
+			box.rail:Hide()
+		end
+		if box.timeLeft then
+			box.timeLeft:Hide()
+		end
+		if box.timeMid then
+			box.timeMid:Hide()
+		end
+		if box.timeRight then
+			box.timeRight:Hide()
+		end
+		if box.help then
+			box.help:Hide()
+		end
+		if box.axis then
+			local ai
+			for ai = 1, 3 do
+				if box.axis[ai] then
+					box.axis[ai]:Hide()
+				end
+			end
+		end
+		if box.thumb then
+			box.thumb:Hide()
+		end
+		if box.liveMark then
+			box.liveMark:Hide()
+		end
+	else
+		header:SetPoint("TOPLEFT", box, "TOPLEFT", 8, -6)
+		header:SetPoint("TOPRIGHT", box, "TOPRIGHT", -8, -6)
+		header:SetHeight(16)
+		plot:SetPoint("TOPLEFT", box, "TOPLEFT", 36, -26)
+		plot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -10, 34)
+		box.graphMinH = K.DETACH_H + K.BOTTOM + 3 * K.ROW_H
+		if box.rail then
+			box.rail:Show()
+		end
+		if box.timeLeft then
+			box.timeLeft:Show()
+		end
+		if box.timeMid then
+			box.timeMid:Show()
+		end
+		if box.timeRight then
+			box.timeRight:Show()
+		end
+		if box.help then
+			box.help:Show()
+		end
+		if box.axis then
+			local ai
+			for ai = 1, 3 do
+				if box.axis[ai] then
+					box.axis[ai]:Show()
+				end
+			end
+		end
+	end
+	if box.SetMinResize and box.graphMinW and box.graphMinH then
+		box:SetMinResize(box.graphMinW, box.graphMinH)
+	end
+	if not compact and box.GetHeight and box.graphMinH then
+		local h = box:GetHeight() or 0
+		if h < box.graphMinH then
+			box:SetHeight(box.graphMinH)
+		end
+	end
+	if box.compactBtn and box.compactBtn.SetBackdropBorderColor then
+		if compact then
+			box.compactBtn:SetBackdropBorderColor(0.45, 0.85, 0.45, 1)
+		else
+			box.compactBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		end
+	end
+end
+
+-- Two offset squares: "open in its own window".
+function paintPopIcon(parent)
+	local sh = parent:CreateTexture(nil, "BORDER")
+	sh:SetTexture(K.SOLID)
+	sh:SetVertexColor(0, 0, 0, 0.9)
+	sh:SetWidth(6)
+	sh:SetHeight(5)
+	sh:SetPoint("CENTER", parent, "CENTER", 2, -2)
+	local back = parent:CreateTexture(nil, "ARTWORK")
+	back:SetTexture(K.SOLID)
+	back:SetVertexColor(1, 0.86, 0.5, 0.4)
+	back:SetWidth(6)
+	back:SetHeight(5)
+	back:SetPoint("CENTER", parent, "CENTER", 1, -1)
+	local frontSh = parent:CreateTexture(nil, "BORDER")
+	frontSh:SetTexture(K.SOLID)
+	frontSh:SetVertexColor(0, 0, 0, 0.9)
+	frontSh:SetWidth(6)
+	frontSh:SetHeight(5)
+	frontSh:SetPoint("CENTER", parent, "CENTER", 0, 0)
+	local front = parent:CreateTexture(nil, "OVERLAY")
+	front:SetTexture(K.SOLID)
+	front:SetVertexColor(1, 0.86, 0.5)
+	front:SetWidth(6)
+	front:SetHeight(5)
+	front:SetPoint("CENTER", parent, "CENTER", -1, 1)
+	parent.markBack = back
+	parent.mark = front
+end
+
+-- Hide the title when the header is too tight, instead of clipping to "...".
+function fitBrandTitle(win)
+	if not win or not win.brandText then
+		return
+	end
+	local fs = win.brandText
+	local need = 0
+	if fs.GetStringWidth then
+		need = fs:GetStringWidth() or 0
+	end
+	local leftEdge = nil
+	if win.brandIcon and win.brandIcon.GetRight then
+		leftEdge = win.brandIcon:GetRight()
+	elseif win.brandBack and win.brandBack.GetRight then
+		leftEdge = win.brandBack:GetRight()
+	elseif win.brand and win.brand.GetRight then
+		leftEdge = win.brand:GetRight()
+	end
+	local rightEdge = nil
+	if win.totalBtn and win.totalBtn.GetLeft then
+		rightEdge = win.totalBtn:GetLeft()
+	end
+	if not leftEdge or not rightEdge then
+		fs:Show()
+		return
+	end
+	local room = rightEdge - leftEdge - 8
+	if room < 12 or need > room then
+		fs:Hide()
+	else
+		fs:Show()
+	end
 end
 
 local function panelBackdrop()
@@ -3621,6 +4514,1393 @@ local function roundBackdrop(edge)
 	}
 end
 
+function makeChromeIcon(parent, name)
+	local b = CreateFrame("Button", name, parent)
+	b:SetWidth(14)
+	b:SetHeight(14)
+	b:SetBackdrop(roundBackdrop(8))
+	b:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+	b:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+	return b
+end
+
+function paintDpsGraph(win, hist, on, mode)
+	if win ~= frame then
+		return
+	end
+	if not mode then
+		mode = "damage"
+	end
+	local box = graphBoxes[mode]
+	if not on then
+		if box then
+			box.graphLive = false
+			box:Hide()
+		end
+		return
+	end
+	if box and box.painting then
+		return
+	end
+	local function clock(sec)
+		sec = math.floor((sec or 0) + 0.5)
+		if sec < 0 then
+			sec = 0
+		end
+		local m = math.floor(sec / 60)
+		local s = sec - m * 60
+		if m >= 60 then
+			local h = math.floor(m / 60)
+			m = m - h * 60
+			return string.format("%d:%02d:%02d", h, m, s)
+		end
+		return string.format("%d:%02d", m, s)
+	end
+	local function niceCeil(v)
+		if not v or v <= 0 then
+			return 10
+		end
+		local step = 10
+		if v >= 200000 then
+			step = 20000
+		elseif v >= 50000 then
+			step = 5000
+		elseif v >= 20000 then
+			step = 2000
+		elseif v >= 5000 then
+			step = 500
+		elseif v >= 1000 then
+			step = 200
+		elseif v >= 200 then
+			step = 50
+		end
+		return math.ceil(v / step) * step
+	end
+	local function buildSeries(samples, asAmount)
+		local out = {}
+		local n = samples and table.getn(samples) or 0
+		if asAmount then
+			if n < 1 then
+				return out
+			end
+			local i
+			for i = 1, n do
+				local cur = samples[i]
+				out[table.getn(out) + 1] = { t = cur.t or 0, r = cur.total or 0 }
+			end
+			return out
+		end
+		if n < 2 then
+			return out
+		end
+		-- Same window as the meter's DPS (settings slider / "since the start").
+		local look = rateSeconds()
+		local fromStart = look < 5
+		local i
+		for i = 2, n do
+			local cur = samples[i]
+			local prev = samples[1]
+			if not fromStart then
+				local j = i
+				while j > 1 and ((cur.t or 0) - (samples[j].t or 0)) < look do
+					j = j - 1
+				end
+				prev = samples[j]
+			end
+			local dt = (cur.t or 0) - (prev.t or 0)
+			local rate = 0
+			if dt >= 0.5 then
+				rate = ((cur.total or 0) - (prev.total or 0)) / dt
+			end
+			if rate < 0 then
+				rate = 0
+			end
+			out[table.getn(out) + 1] = { t = cur.t or 0, r = rate }
+		end
+		return out
+	end
+	local function rateAt(series, t)
+		local n = table.getn(series)
+		if n < 1 then
+			return 0
+		end
+		if t <= (series[1].t or 0) then
+			return series[1].r or 0
+		end
+		if t >= (series[n].t or 0) then
+			return series[n].r or 0
+		end
+		local i
+		for i = 2, n do
+			local a = series[i - 1]
+			local b = series[i]
+			if t <= (b.t or 0) then
+				local span = (b.t or 0) - (a.t or 0)
+				if span < 0.001 then
+					return b.r or 0
+				end
+				local u = (t - (a.t or 0)) / span
+				return (a.r or 0) + ((b.r or 0) - (a.r or 0)) * u
+			end
+		end
+		return series[n].r or 0
+	end
+	-- A true rotated line is not available on this client, so the path is drawn
+	-- with short overlapping stamps. Dense enough, it reads as one line.
+	local function clearStamps(target)
+		local n = target.stampCount or 0
+		local i
+		for i = 1, n do
+			if target.stamps[i] then
+				target.stamps[i]:Hide()
+			end
+		end
+		target.stampCount = 0
+	end
+	local function addStamp(target, plot, x, y, alpha)
+		if not alpha or alpha < 0.06 then
+			return
+		end
+		if not target.stamps then
+			target.stamps = {}
+		end
+		local n = (target.stampCount or 0) + 1
+		target.stampCount = n
+		local tex = target.stamps[n]
+		if not tex then
+			-- Draw on the clip child so anything past the plot edge is cut off.
+			local host = target.stampHost or plot
+			tex = host:CreateTexture(nil, "ARTWORK")
+			tex:SetTexture(K.SOLID)
+			target.stamps[n] = tex
+		end
+		x = math.floor(x + 0.5)
+		y = math.floor(y + 0.5)
+		local maxX = (target.plotW or 0) - 1
+		local maxY = (target.plotH or 0) - 1
+		if maxX > 2 then
+			if x < 1 then
+				x = 1
+			elseif x > maxX then
+				x = maxX
+			end
+		end
+		if maxY > 2 then
+			if y < 1 then
+				y = 1
+			elseif y > maxY then
+				y = maxY
+			end
+		end
+		tex:SetWidth(1)
+		tex:SetHeight(1)
+		tex:ClearAllPoints()
+		tex:SetPoint("CENTER", target.stampHost or plot, "BOTTOMLEFT", x, y)
+		if alpha > 1 then
+			alpha = 1
+		end
+		tex:SetVertexColor(1, 0.82, 0.35, alpha)
+		tex:Show()
+	end
+	-- Split coverage across two pixels so shallow slopes do not stair-step as hard.
+	local function plotDot(target, plot, x, y)
+		local y0 = math.floor(y)
+		local frac = y - y0
+		addStamp(target, plot, x, y0, 1 - frac)
+		addStamp(target, plot, x, y0 + 1, frac)
+	end
+	local function stroke(target, plot, x1, y1, x2, y2)
+		local dx = x2 - x1
+		local dy = y2 - y1
+		local dist = math.sqrt(dx * dx + dy * dy)
+		local steps = math.floor(dist * 1.5 + 0.5)
+		if steps < 1 then
+			steps = 1
+		elseif steps > 220 then
+			steps = 220
+		end
+		local i
+		for i = 0, steps do
+			local u = i / steps
+			plotDot(target, plot, x1 + dx * u, y1 + dy * u)
+		end
+	end
+	if not box then
+		local tag = mode
+		box = CreateFrame("Frame", "AZSSpellMeterGraph_" .. tag, UIParent)
+		graphBoxes[mode] = box
+		box.graphMode = mode
+		local savedOpen = graphSlot(mode)
+		local openW = 380
+		local openH = 200
+		local slotOpen = savedOpen.graphBy and savedOpen.graphBy[mode]
+		if slotOpen then
+			openW = tonumber(slotOpen.w) or openW
+			openH = tonumber(slotOpen.h) or openH
+		elseif savedOpen then
+			openW = tonumber(savedOpen.graphW) or openW
+			openH = tonumber(savedOpen.graphH) or openH
+		end
+		-- Match the smallest non-graph window (detached meter) floor.
+		local graphMinW = 280
+		local graphMinH = K.DETACH_H + K.BOTTOM + 3 * K.ROW_H
+		if openW < graphMinW then
+			openW = graphMinW
+		elseif openW > 720 then
+			openW = 720
+		end
+		if openH < graphMinH then
+			openH = graphMinH
+		elseif openH > 480 then
+			openH = 480
+		end
+		box:SetWidth(openW)
+		box:SetHeight(openH)
+		box:SetFrameStrata("HIGH")
+		box:SetMovable(true)
+		box:EnableMouse(true)
+		if box.SetResizable then
+			box:SetResizable(true)
+		end
+		if box.SetMinResize then
+			box:SetMinResize(graphMinW, graphMinH)
+		end
+		if box.SetMaxResize then
+			box:SetMaxResize(720, 480)
+		end
+		box.graphMinW = graphMinW
+		box.graphMinH = graphMinH
+		box:SetBackdrop(roundBackdrop(12))
+		box:SetBackdropColor(0.05, 0.04, 0.03, 0.96)
+		box:SetBackdropBorderColor(0.78, 0.58, 0.22, 1)
+		local openScale = 1
+		if savedOpen and tonumber(savedOpen.scale) then
+			openScale = tonumber(savedOpen.scale)
+		end
+		if openScale < 0.7 then
+			openScale = 0.7
+		elseif openScale > 1.5 then
+			openScale = 1.5
+		end
+		if box.SetScale then
+			box:SetScale(openScale)
+			box.paintedScale = openScale
+		end
+		box:RegisterForDrag("LeftButton")
+		box:SetScript("OnDragStart", function()
+			if config().locked then
+				return
+			end
+			if (this.plot and this.plot.dragging) or (this.rail and this.rail.dragging) or this.sizing then
+				return
+			end
+			this:StartMoving()
+		end)
+		box:SetScript("OnDragStop", function()
+			this:StopMovingOrSizing()
+			saveGraphSlot(this)
+		end)
+		local header = CreateFrame("Button", "AZSSpellMeterGraphHeader_" .. tag, box)
+		header:SetPoint("TOPLEFT", box, "TOPLEFT", 8, -6)
+		header:SetPoint("TOPRIGHT", box, "TOPRIGHT", -8, -6)
+		header:SetHeight(16)
+		header:SetBackdrop(panelBackdrop())
+		local tint = HEADER_TINT[mode] or HEADER_TINT.damage
+		header:SetBackdropColor(tint[1], tint[2], tint[3], 0.88)
+		header:SetBackdropBorderColor(tint[4], tint[5], tint[6], 1)
+		header:RegisterForDrag("LeftButton")
+		header:SetScript("OnDragStart", function()
+			if config().locked then
+				return
+			end
+			box:StartMoving()
+		end)
+		header:SetScript("OnDragStop", function()
+			box:StopMovingOrSizing()
+			saveGraphSlot(box)
+		end)
+		box.header = header
+		local closeBtn = CreateFrame("Button", "AZSSpellMeterGraphClose_" .. tag, header)
+		closeBtn:SetPoint("RIGHT", header, "RIGHT", -3, 0)
+		closeBtn:SetWidth(14)
+		closeBtn:SetHeight(14)
+		closeBtn:SetBackdrop(roundBackdrop(8))
+		closeBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+		closeBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		paintX(closeBtn)
+		box.closeBtn = closeBtn
+		closeBtn:SetScript("OnClick", function()
+			setGraphOpen(box.graphMode or box.mode or mode, false)
+			box.graphLive = false
+			box:Hide()
+			refresh()
+		end)
+		local compactBtn = CreateFrame("Button", "AZSSpellMeterGraphCompact_" .. tag, header)
+		compactBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
+		compactBtn:SetWidth(14)
+		compactBtn:SetHeight(14)
+		compactBtn:SetBackdrop(roundBackdrop(8))
+		compactBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+		compactBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		paintCompactIcon(compactBtn)
+		box.compactBtn = compactBtn
+		compactBtn:SetScript("OnClick", function()
+			box.compact = not box.compact
+			applyGraphCompact(box)
+			saveGraphSlot(box)
+			box.needDraw = true
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+		end)
+		compactBtn:SetScript("OnEnter", function()
+			if box.compact then
+				showTip(this, "RIGHT", "Expand", nil, {
+					{ "Show the timeline and axis labels again.", 1, 1, 1 },
+				})
+			else
+				showTip(this, "RIGHT", "Compact", nil, {
+					{ "Hide the timeline and axis labels. Header sits flush on the plot.", 1, 1, 1 },
+				})
+			end
+		end)
+		compactBtn:SetScript("OnLeave", function()
+			leaveTip()
+		end)
+		local followBtn = CreateFrame("Button", "AZSSpellMeterGraphFollow_" .. tag, header)
+		followBtn:SetPoint("RIGHT", compactBtn, "LEFT", -4, 0)
+		followBtn:SetWidth(44)
+		followBtn:SetHeight(14)
+		followBtn:SetBackdrop(roundBackdrop(8))
+		followBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+		followBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		local followText = followBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		followText:SetPoint("CENTER", followBtn, "CENTER", 0, 0.5)
+		followText:SetText("Follow")
+		face(followText, 9)
+		followText:SetTextColor(1, 0.86, 0.5)
+		box.followBtn = followBtn
+		box.followText = followText
+		followBtn:SetScript("OnClick", function()
+			box.lockFull = false
+			box.follow = true
+			box.needDraw = true
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+		end)
+		followBtn:SetScript("OnEnter", function()
+			showTip(this, "RIGHT", "Follow", nil, {
+				{ "Keep the view pinned to the live end at the current zoom.", 1, 1, 1 },
+			})
+		end)
+		followBtn:SetScript("OnLeave", function()
+			leaveTip()
+		end)
+		local fullBtn = CreateFrame("Button", "AZSSpellMeterGraphFull_" .. tag, header)
+		fullBtn:SetPoint("RIGHT", followBtn, "LEFT", -4, 0)
+		fullBtn:SetWidth(34)
+		fullBtn:SetHeight(14)
+		fullBtn:SetBackdrop(roundBackdrop(8))
+		fullBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+		fullBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		local fullText = fullBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		fullText:SetPoint("CENTER", fullBtn, "CENTER", 0, 0.5)
+		fullText:SetText("Full")
+		face(fullText, 9)
+		fullText:SetTextColor(1, 0.86, 0.5)
+		box.fullBtn = fullBtn
+		box.fullText = fullText
+		fullBtn:SetScript("OnClick", function()
+			box.lockFull = not box.lockFull
+			if box.lockFull then
+				box.follow = false
+				box.viewStart = nil
+				box.viewSpan = nil
+				box.axisMax = nil
+			end
+			box.needDraw = true
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+		end)
+		fullBtn:SetScript("OnEnter", function()
+			showTip(this, "RIGHT", "Full", nil, {
+				{ "Keep the whole run in view as it grows. Click again to zoom and pan freely.", 1, 1, 1 },
+			})
+		end)
+		fullBtn:SetScript("OnLeave", function()
+			leaveTip()
+		end)
+		-- Damage/Healing ↔ DPS/HPS — same gold pills as Full/Follow.
+		local openWords = meterWords(mode)
+		local amountBtn = CreateFrame("Button", "AZSSpellMeterGraphAmount_" .. tag, header)
+		amountBtn:SetPoint("LEFT", header, "LEFT", 4, 0)
+		amountBtn:SetWidth(58)
+		amountBtn:SetHeight(14)
+		amountBtn:SetBackdrop(roundBackdrop(8))
+		amountBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+		amountBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		local amountText = amountBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		-- Friz + outline sits low in round pills; nudge up so descenders stay inside.
+		amountText:SetPoint("CENTER", amountBtn, "CENTER", 0, 0.5)
+		amountText:SetText(openWords)
+		face(amountText, 9)
+		amountText:SetTextColor(1, 0.86, 0.5)
+		box.amountBtn = amountBtn
+		box.amountText = amountText
+		local metricBtn = CreateFrame("Button", "AZSSpellMeterGraphMetric_" .. tag, header)
+		metricBtn:SetPoint("LEFT", amountBtn, "RIGHT", -2, 0)
+		metricBtn:SetWidth(36)
+		metricBtn:SetHeight(14)
+		metricBtn:SetBackdrop(roundBackdrop(8))
+		metricBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+		metricBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		local metricText = metricBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		metricText:SetPoint("CENTER", metricBtn, "CENTER", 0, 0.5)
+		local _, openRate = meterWords(mode)
+		metricText:SetText(openRate or "DPS")
+		face(metricText, 9)
+		metricText:SetTextColor(1, 0.86, 0.5)
+		box.metricBtn = metricBtn
+		box.metricText = metricText
+		local function setGraphMetric(asAmount)
+			box.showAmount = asAmount and true or false
+			box.axisMax = nil
+			local saved = config().look
+			if not saved then
+				config().look = {}
+				saved = config().look
+			end
+			saved.graphAmount = box.showAmount
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+		end
+		amountBtn:SetScript("OnClick", function()
+			setGraphMetric(true)
+		end)
+		amountBtn:SetScript("OnEnter", function()
+			local amountWord = meterWords(box.mode or mode)
+			showTip(this, "RIGHT", amountWord or "Damage", nil, {
+				{ "Plot total " .. string.lower(amountWord or "damage") .. " over the run.", 1, 1, 1 },
+			})
+		end)
+		amountBtn:SetScript("OnLeave", function()
+			leaveTip()
+		end)
+		metricBtn:SetScript("OnClick", function()
+			setGraphMetric(false)
+		end)
+		metricBtn:SetScript("OnEnter", function()
+			local _, rateWord = meterWords(box.mode or mode)
+			showTip(this, "RIGHT", rateWord or "DPS", nil, {
+				{ "Plot " .. string.lower(rateWord or "DPS") .. " over the run.", 1, 1, 1 },
+			})
+		end)
+		metricBtn:SetScript("OnLeave", function()
+			leaveTip()
+		end)
+		if savedOpen and savedOpen.graphAmount then
+			box.showAmount = true
+		else
+			box.showAmount = false
+		end
+		local rateBtn = CreateFrame("Button", "AZSSpellMeterGraphRate_" .. tag, header)
+		rateBtn:SetPoint("LEFT", metricBtn, "RIGHT", 8, 0)
+		rateBtn:SetHeight(14)
+		rateBtn:SetWidth(48)
+		local rateText = rateBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		rateText:SetPoint("LEFT", rateBtn, "LEFT", 0, 0)
+		face(rateText, 11)
+		rateText:SetTextColor(0.78, 0.95, 0.72)
+		box.rateBtn = rateBtn
+		box.rateText = rateText
+		rateBtn:SetScript("OnEnter", function()
+			local amountWord, rateWord = meterWords(box.mode or mode)
+			if box.showAmount then
+				showTip(this, "RIGHT", amountWord or "Damage", nil, {
+					{ "Total " .. string.lower(amountWord or "damage") .. " for this graph's view.", 1, 1, 1 },
+				})
+			else
+				showTip(this, "RIGHT", rateWord or "DPS", nil, {
+					{ "Current " .. string.lower(rateWord or "DPS") .. " for this graph's view.", 1, 1, 1 },
+				})
+			end
+		end)
+		rateBtn:SetScript("OnLeave", function()
+			leaveTip()
+		end)
+		local plot = CreateFrame("Frame", "AZSSpellMeterGraphPlot_" .. tag, box)
+		-- Header is the only chrome above the plot (no second switch row).
+		plot:SetPoint("TOPLEFT", box, "TOPLEFT", 36, -26)
+		plot:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -10, 34)
+		plot:SetBackdrop(panelBackdrop())
+		plot:SetBackdropColor(0.015, 0.015, 0.015, 0.95)
+		plot:SetBackdropBorderColor(0.35, 0.26, 0.1, 1)
+		plot:EnableMouse(true)
+		plot:EnableMouseWheel(true)
+		box.plot = plot
+		-- ScrollFrame clips child textures that would otherwise spill past the border.
+		local clip = CreateFrame("ScrollFrame", "AZSSpellMeterGraphClip_" .. tag, plot)
+		clip:SetPoint("TOPLEFT", plot, "TOPLEFT", 2, -2)
+		clip:SetPoint("BOTTOMRIGHT", plot, "BOTTOMRIGHT", -2, 2)
+		clip:EnableMouse(false)
+		local stampHost = CreateFrame("Frame", "AZSSpellMeterGraphStamps_" .. tag, clip)
+		stampHost:SetWidth(316)
+		stampHost:SetHeight(116)
+		stampHost:EnableMouse(false)
+		clip:SetScrollChild(stampHost)
+		box.clip = clip
+		box.stampHost = stampHost
+		box.stamps = {}
+		box.stampCount = 0
+		box.guides = {}
+		local gi
+		for gi = 1, 2 do
+			local line = plot:CreateTexture(nil, "BACKGROUND")
+			line:SetTexture(K.SOLID)
+			line:SetHeight(1)
+			line:SetVertexColor(0.4, 0.32, 0.16, 0.45)
+			box.guides[gi] = line
+		end
+		-- Named overlay so the hover line/dot can be kept above level-up cards.
+		local overlay = CreateFrame("Frame", "AZSSpellMeterGraphOverlay_" .. tag, plot)
+		overlay:SetAllPoints(plot)
+		overlay:EnableMouse(false)
+		box.overlay = overlay
+		local cross = overlay:CreateTexture(nil, "OVERLAY")
+		cross:SetTexture(K.SOLID)
+		cross:SetWidth(1)
+		cross:SetVertexColor(1, 0.92, 0.55, 0.9)
+		cross:Hide()
+		box.cross = cross
+		local dot = overlay:CreateTexture(nil, "OVERLAY")
+		dot:SetTexture(K.SOLID)
+		dot:SetWidth(6)
+		dot:SetHeight(6)
+		dot:SetVertexColor(1, 0.95, 0.7, 1)
+		dot:Hide()
+		box.dot = dot
+		box.axis = {}
+		local ai
+		for ai = 1, 3 do
+			local label = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			label:SetJustifyH("RIGHT")
+			face(label, 9)
+			label:SetTextColor(0.7, 0.65, 0.5)
+			box.axis[ai] = label
+		end
+		local note = plot:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		note:SetPoint("CENTER", plot, "CENTER", 0, 0)
+		face(note, 10)
+		note:SetTextColor(0.7, 0.65, 0.5)
+		box.note = note
+		local rail = CreateFrame("Button", "AZSSpellMeterGraphRail_" .. tag, box)
+		rail:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 36, 12)
+		rail:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -10, 12)
+		rail:SetHeight(10)
+		rail:SetBackdrop(panelBackdrop())
+		rail:SetBackdropColor(0.08, 0.06, 0.04, 0.95)
+		rail:SetBackdropBorderColor(0.35, 0.26, 0.1, 1)
+		rail:EnableMouse(true)
+		box.rail = rail
+		local thumb = rail:CreateTexture(nil, "ARTWORK")
+		thumb:SetTexture(K.SOLID)
+		thumb:SetVertexColor(0.9, 0.66, 0.22, 0.85)
+		box.thumb = thumb
+		local live = rail:CreateTexture(nil, "OVERLAY")
+		live:SetTexture(K.SOLID)
+		live:SetWidth(2)
+		live:SetVertexColor(0.55, 0.9, 0.55, 0.95)
+		box.liveMark = live
+		local timeLeft = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		timeLeft:SetPoint("BOTTOMLEFT", rail, "TOPLEFT", 0, 2)
+		face(timeLeft, 9)
+		timeLeft:SetTextColor(0.55, 0.5, 0.4)
+		box.timeLeft = timeLeft
+		local timeMid = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		timeMid:SetPoint("BOTTOM", rail, "TOP", 0, 2)
+		face(timeMid, 9)
+		timeMid:SetTextColor(0.55, 0.5, 0.4)
+		box.timeMid = timeMid
+		local timeRight = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		timeRight:SetPoint("BOTTOMRIGHT", rail, "TOPRIGHT", 0, 2)
+		timeRight:SetJustifyH("RIGHT")
+		face(timeRight, 9)
+		timeRight:SetTextColor(0.55, 0.5, 0.4)
+		box.timeRight = timeRight
+		local help = (overlay or plot):CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		help:SetPoint("BOTTOMRIGHT", plot, "BOTTOMRIGHT", -6, 4)
+		help:SetJustifyH("RIGHT")
+		face(help, 9)
+		help:SetTextColor(0.55, 0.5, 0.4)
+		help:SetText("scroll zoom · drag pan")
+		box.help = help
+		local grip = CreateFrame("Button", "AZSSpellMeterGraphGrip_" .. tag, box)
+		grip:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -2, 2)
+		grip:SetWidth(14)
+		grip:SetHeight(14)
+		grip:SetFrameLevel((box:GetFrameLevel() or 1) + 5)
+		box.grip = grip
+		local gmark
+		for gmark = 1, 3 do
+			local mark = grip:CreateTexture(nil, "ARTWORK")
+			mark:SetTexture(K.SOLID)
+			mark:SetVertexColor(0.72, 0.56, 0.24, 0.95)
+			mark:SetWidth(gmark * 3)
+			mark:SetHeight(1)
+			mark:SetPoint("BOTTOMRIGHT", grip, "BOTTOMRIGHT", -1, 1 + (gmark - 1) * 3)
+		end
+		local function saveGraphBox()
+			saveGraphSlot(box)
+		end
+		grip:SetScript("OnMouseDown", function()
+			if config().locked then
+				return
+			end
+			local scale = 1
+			if box.GetEffectiveScale then
+				scale = box:GetEffectiveScale() or 1
+			end
+			local cx, cy = GetCursorPosition()
+			box.sizeX = cx / scale
+			box.sizeY = cy / scale
+			box.sizeW = box:GetWidth()
+			box.sizeH = box:GetHeight()
+			box.sizing = true
+		end)
+		grip:SetScript("OnMouseUp", function()
+			if not box.sizing then
+				return
+			end
+			box.sizing = false
+			saveGraphBox()
+			paintDpsGraph(frame, rateHist[box.graphMode or box.mode or "damage"], true, box.graphMode or box.mode)
+		end)
+		box:SetScript("OnUpdate", function()
+			if not box.sizing then
+				return
+			end
+			if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
+				box.sizing = false
+				saveGraphBox()
+				paintDpsGraph(frame, rateHist[box.graphMode or box.mode or "damage"], true, box.graphMode or box.mode)
+				return
+			end
+			local scale = 1
+			if box.GetEffectiveScale then
+				scale = box:GetEffectiveScale() or 1
+			end
+			local cx, cy = GetCursorPosition()
+			cx = cx / scale
+			cy = cy / scale
+			local w = (box.sizeW or 380) + (cx - (box.sizeX or cx))
+			local h = (box.sizeH or 200) - (cy - (box.sizeY or cy))
+			local minW = box.graphMinW or 280
+			local minH = box.graphMinH or (K.DETACH_H + K.BOTTOM + 3 * K.ROW_H)
+			if w < minW then
+				w = minW
+			elseif w > 720 then
+				w = 720
+			end
+			if h < minH then
+				h = minH
+			elseif h > 480 then
+				h = 480
+			end
+			box:SetWidth(w)
+			box:SetHeight(h)
+			if box.compact then
+				box.plotW = w - 6
+				box.plotH = h - 20
+			else
+				box.plotW = w - 46
+				box.plotH = h - 60
+			end
+			if box.plotW < 80 then
+				box.plotW = 80
+			end
+			if box.plotH < 40 then
+				box.plotH = 40
+			end
+		end)
+		local function applyView(start, span, follow)
+			local series = box.series
+			if not series or table.getn(series) < 2 then
+				return
+			end
+			local runStart = series[1].t or 0
+			local runEnd = series[table.getn(series)].t or runStart
+			local runSpan = runEnd - runStart
+			if runSpan < 1 then
+				runSpan = 1
+			end
+			-- Keep at least half a minute on the axis so a short run is not
+			-- stretched across the whole plot.
+			local fullSpan = runSpan
+			if fullSpan < 30 then
+				fullSpan = 30
+			end
+			if span < 8 then
+				span = 8
+			elseif span > fullSpan then
+				span = fullSpan
+			end
+			if follow then
+				start = runEnd - span
+			end
+			if start < runStart then
+				start = runStart
+			end
+			if start + span > runStart + fullSpan then
+				start = runStart + fullSpan - span
+			end
+			if start > runEnd then
+				start = runEnd
+			end
+			box.viewStart = start
+			box.viewSpan = span
+			box.follow = follow and true or false
+			if not follow then
+				box.lockFull = false
+			end
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+		end
+		box.applyView = applyView
+		plot:SetScript("OnMouseWheel", function()
+			local series = box.series
+			if not series or table.getn(series) < 2 then
+				return
+			end
+			local runStart = series[1].t or 0
+			local runEnd = series[table.getn(series)].t or runStart
+			local runSpan = runEnd - runStart
+			if runSpan < 1 then
+				runSpan = 1
+			end
+			local span = box.viewSpan or runSpan
+			local start = box.viewStart or runStart
+			local scale = 1
+			if plot.GetEffectiveScale then
+				scale = plot:GetEffectiveScale() or 1
+			end
+			local cx = GetCursorPosition() / scale
+			local left = plot:GetLeft() or 0
+			local width = box.framePlotW
+			if not width then
+				if box.compact then
+					width = (box:GetWidth() or 380) - 6
+				else
+					width = (box:GetWidth() or 380) - 46
+				end
+			end
+			local u = 0.5
+			if width > 1 then
+				u = (cx - left) / width
+			end
+			if u < 0 then
+				u = 0
+			elseif u > 1 then
+				u = 1
+			end
+			local focus = start + span * u
+			if arg1 and arg1 > 0 then
+				span = span * 0.8
+			else
+				span = span * 1.25
+			end
+			start = focus - span * u
+			applyView(start, span, false)
+		end)
+		plot:SetScript("OnMouseDown", function()
+			if arg1 ~= "LeftButton" then
+				return
+			end
+			local scale = 1
+			if plot.GetEffectiveScale then
+				scale = plot:GetEffectiveScale() or 1
+			end
+			plot.dragging = true
+			plot.dragX = GetCursorPosition() / scale
+			plot.dragStart = box.viewStart
+			box.follow = false
+		end)
+		plot:SetScript("OnMouseUp", function()
+			plot.dragging = false
+		end)
+		plot:SetScript("OnLeave", function()
+			plot.dragging = false
+			box.cross:Hide()
+			box.dot:Hide()
+			leaveTip()
+		end)
+		plot:SetScript("OnUpdate", function()
+			if not box:IsShown() then
+				return
+			end
+			local series = box.series
+			if not series or table.getn(series) < 2 then
+				return
+			end
+			local scale = 1
+			if plot.GetEffectiveScale then
+				scale = plot:GetEffectiveScale() or 1
+			end
+			local runStart = series[1].t or 0
+			local runEnd = series[table.getn(series)].t or runStart
+			local runSpan = runEnd - runStart
+			if runSpan < 1 then
+				runSpan = 1
+			end
+			local span = box.viewSpan or runSpan
+			local start = box.viewStart or runStart
+			local width = box.framePlotW
+			local height = box.framePlotH
+			if not width then
+				if box.compact then
+					width = (box:GetWidth() or 380) - 6
+				else
+					width = (box:GetWidth() or 380) - 46
+				end
+			end
+			if not height then
+				if box.compact then
+					height = (box:GetHeight() or 210) - 20
+				else
+					height = (box:GetHeight() or 210) - 60
+				end
+			end
+			if width < 80 then
+				width = 80
+			end
+			if height < 40 then
+				height = 40
+			elseif (not box.compact) and height < 60 then
+				height = 60
+			end
+			if plot.dragging then
+				local cx = GetCursorPosition() / scale
+				local dx = (plot.dragX or cx) - cx
+				local shift = 0
+				if width > 1 then
+					shift = (dx / width) * span
+				end
+				applyView((plot.dragStart or start) + shift, span, false)
+				return
+			end
+			local over = false
+			if plot.IsMouseOver then
+				over = plot:IsMouseOver()
+			elseif MouseIsOver then
+				over = MouseIsOver(plot)
+			end
+			if not over then
+				leaveTip()
+				box.cross:Hide()
+				box.dot:Hide()
+				return
+			end
+			local cx = GetCursorPosition() / scale
+			local left = plot:GetLeft() or 0
+			local u = 0
+			if width > 1 then
+				u = (cx - left) / width
+			end
+			if u < 0 then
+				u = 0
+			elseif u > 1 then
+				u = 1
+			end
+			local t = start + span * u
+			local rate = rateAt(series, t)
+			local axis = box.axisMax or 1
+			local x = 2 + u * (width - 4)
+			local yMin = 2
+			local yMax = height - 2
+			if yMax < yMin then
+				yMax = yMin
+			end
+			local y = yMin
+			if axis > 0 then
+				y = yMin + (yMax - yMin) * (rate / axis)
+			end
+			if y < yMin then
+				y = yMin
+			elseif y > yMax then
+				y = yMax
+			end
+			local tipFrame = box.overlay or plot
+			box.cross:ClearAllPoints()
+			box.cross:SetPoint("TOP", tipFrame, "TOPLEFT", x, -2)
+			box.cross:SetPoint("BOTTOM", tipFrame, "BOTTOMLEFT", x, 2)
+			box.cross:Show()
+			box.dot:ClearAllPoints()
+			box.dot:SetPoint("CENTER", tipFrame, "BOTTOMLEFT", x, y)
+			box.dot:Show()
+			local tipVal = fmtRate(rate)
+			local tipUnit = "dps"
+			if box.showAmount then
+				tipVal = comma(math.floor(rate + 0.5))
+				local amountWord = meterWords(box.mode)
+				tipUnit = string.lower(amountWord or "damage")
+			else
+				local _, rateWord = meterWords(box.mode)
+				tipUnit = string.lower(rateWord or "DPS")
+			end
+			showTip(plot, "RIGHT", clock(t), nil, {
+				{ tipVal .. " " .. tipUnit, 1, 0.95, 0.75 },
+			})
+		end)
+		rail:SetScript("OnMouseDown", function()
+			if arg1 ~= "LeftButton" then
+				return
+			end
+			local series = box.series
+			if not series or table.getn(series) < 2 then
+				return
+			end
+			local scale = 1
+			if rail.GetEffectiveScale then
+				scale = rail:GetEffectiveScale() or 1
+			end
+			local runStart = series[1].t or 0
+			local runEnd = series[table.getn(series)].t or runStart
+			local runSpan = runEnd - runStart
+			if runSpan < 1 then
+				runSpan = 1
+			end
+			local fullSpan = runSpan
+			if fullSpan < 30 then
+				fullSpan = 30
+			end
+			local span = box.viewSpan or fullSpan
+			local width = rail:GetWidth() or 1
+			local left = rail:GetLeft() or 0
+			local cx = GetCursorPosition() / scale
+			local u = 0
+			if width > 1 then
+				u = (cx - left) / width
+			end
+			if u < 0 then
+				u = 0
+			elseif u > 1 then
+				u = 1
+			end
+			local start = runStart + u * fullSpan - span / 2
+			rail.dragging = true
+			applyView(start, span, false)
+		end)
+		rail:SetScript("OnMouseUp", function()
+			rail.dragging = false
+		end)
+		rail:SetScript("OnLeave", function()
+			rail.dragging = false
+		end)
+		rail:SetScript("OnUpdate", function()
+			if not rail.dragging then
+				return
+			end
+			local series = box.series
+			if not series or table.getn(series) < 2 then
+				return
+			end
+			local scale = 1
+			if rail.GetEffectiveScale then
+				scale = rail:GetEffectiveScale() or 1
+			end
+			local runStart = series[1].t or 0
+			local runEnd = series[table.getn(series)].t or runStart
+			local runSpan = runEnd - runStart
+			if runSpan < 1 then
+				runSpan = 1
+			end
+			local fullSpan = runSpan
+			if fullSpan < 30 then
+				fullSpan = 30
+			end
+			local span = box.viewSpan or fullSpan
+			local width = rail:GetWidth() or 1
+			local left = rail:GetLeft() or 0
+			local cx = GetCursorPosition() / scale
+			local u = 0
+			if width > 1 then
+				u = (cx - left) / width
+			end
+			if u < 0 then
+				u = 0
+			elseif u > 1 then
+				u = 1
+			end
+			local start = runStart + u * fullSpan - span / 2
+			applyView(start, span, false)
+		end)
+		local saved = graphSlot(mode)
+		local slot = saved.graphBy and saved.graphBy[mode]
+		if slot and slot.x ~= nil then
+			box:SetPoint(slot.point or "TOPLEFT", UIParent, slot.rel or "TOPLEFT", slot.x, slot.y)
+		elseif mode == "damage" and saved.graphPoint and saved.graphX ~= nil then
+			box:SetPoint(saved.graphPoint, UIParent, saved.graphRel or "TOPLEFT", saved.graphX, saved.graphY)
+		else
+			parkBeside(box, frame)
+			local n = 0
+			local other, otherBox
+			for other, otherBox in pairs(graphBoxes) do
+				if other ~= mode and otherBox and otherBox:IsShown() then
+					n = n + 1
+				end
+			end
+			if n > 0 then
+				local point, _, rel, x, y = box:GetPoint(1)
+				if x and y then
+					box:ClearAllPoints()
+					box:SetPoint(point or "TOPLEFT", UIParent, rel or "TOPLEFT", x + n * 22, y - n * 22)
+				end
+			end
+		end
+		box.follow = true
+		box.lockFull = false
+		box.viewStart = nil
+		box.viewSpan = 30
+		box.graphLive = false
+		local slotCompact = saved.graphBy and saved.graphBy[mode]
+		if slotCompact and slotCompact.compact then
+			box.compact = true
+		else
+			box.compact = false
+		end
+		applyGraphCompact(box)
+	end
+	-- Only reset the view when the graph option is turned on, not when a
+	-- level-up card briefly covers or reshuffles the window.
+	if not box.graphLive then
+		box.graphLive = true
+		if not box.lockFull then
+			box.follow = true
+			box.viewStart = nil
+			box.viewSpan = 30
+		end
+	end
+	box.painting = true
+	box.mode = mode
+	box.graphMode = mode
+	applyGraphCompact(box)
+	if box.showAmount == nil then
+		local savedMetric = config().look
+		box.showAmount = savedMetric and savedMetric.graphAmount and true or false
+	end
+	local amountWord, rateWord = meterWords(mode)
+	local series = buildSeries(hist, box.showAmount)
+	box.series = series
+	local sn = table.getn(series)
+	-- Live number comes from this graph's series, not the main window's view.
+	local liveVal = 0
+	if sn >= 1 then
+		liveVal = series[sn].r or 0
+	end
+	if box.showAmount then
+		box.rateText:SetText(comma(liveVal))
+	else
+		box.rateText:SetText(fmtRate(liveVal))
+	end
+	if box.rateBtn and box.rateText and box.rateText.GetStringWidth then
+		local rw = (box.rateText:GetStringWidth() or 24) + 4
+		if rw < 28 then
+			rw = 28
+		end
+		box.rateBtn:SetWidth(rw)
+	end
+	if box.header then
+		local tint = HEADER_TINT[mode] or HEADER_TINT.damage
+		local bgA = 0.88
+		local savedBg = config().look
+		if savedBg and type(savedBg.panel) == "table" and savedBg.panel[4] ~= nil then
+			bgA = savedBg.panel[4]
+		end
+		box.header:SetBackdropColor(tint[1], tint[2], tint[3], bgA)
+		box.header:SetBackdropBorderColor(tint[4], tint[5], tint[6], 1)
+	end
+	if box.amountText then
+		box.amountText:SetText(amountWord)
+	end
+	if box.metricText then
+		box.metricText:SetText(rateWord)
+	end
+	if box.followText then
+		if box.follow and not box.lockFull then
+			box.followText:SetTextColor(0.7, 0.95, 0.7)
+			box.followBtn:SetBackdropBorderColor(0.45, 0.85, 0.45, 1)
+		else
+			box.followText:SetTextColor(1, 0.86, 0.5)
+			box.followBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		end
+	end
+	if box.fullText then
+		if box.lockFull then
+			box.fullText:SetTextColor(0.7, 0.95, 0.7)
+			box.fullBtn:SetBackdropBorderColor(0.45, 0.85, 0.45, 1)
+		else
+			box.fullText:SetTextColor(1, 0.86, 0.5)
+			box.fullBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		end
+	end
+	if box.amountText and box.metricText then
+		if box.showAmount then
+			box.amountText:SetTextColor(0.7, 0.95, 0.7)
+			box.amountBtn:SetBackdropBorderColor(0.45, 0.85, 0.45, 1)
+			box.metricText:SetTextColor(1, 0.86, 0.5)
+			box.metricBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		else
+			box.amountText:SetTextColor(1, 0.86, 0.5)
+			box.amountBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+			box.metricText:SetTextColor(0.7, 0.95, 0.7)
+			box.metricBtn:SetBackdropBorderColor(0.45, 0.85, 0.45, 1)
+		end
+	end
+	if sn < 2 then
+		box.note:SetText("A few seconds of combat fill this in.")
+		box.note:Show()
+		box.timeLeft:SetText("")
+		box.timeMid:SetText("")
+		box.timeRight:SetText("")
+		box.axis[1]:SetText("")
+		box.axis[2]:SetText("")
+		box.axis[3]:SetText("")
+		clearStamps(box)
+		if box.thumb then
+			box.thumb:Hide()
+		end
+		if box.liveMark then
+			box.liveMark:Hide()
+		end
+		box:Show()
+		raiseOverCards(box)
+		box.painting = false
+		return
+	end
+	box.note:Hide()
+	local runStart = series[1].t or 0
+	local runEnd = series[sn].t or runStart
+	local runSpan = runEnd - runStart
+	if runSpan < 1 then
+		runSpan = 1
+	end
+	-- Pad short runs to 30s so the early DPS ramp is not stretched full-width.
+	local fullSpan = runSpan
+	if fullSpan < 30 then
+		fullSpan = 30
+	end
+	if box.lockFull or not box.viewSpan then
+		box.viewSpan = fullSpan
+		box.viewStart = runStart
+	elseif box.viewSpan > fullSpan then
+		box.viewSpan = fullSpan
+	end
+	if box.follow and not box.lockFull then
+		box.viewStart = runEnd - box.viewSpan
+	elseif not box.viewStart then
+		box.viewStart = runStart
+	end
+	if box.viewStart < runStart then
+		box.viewStart = runStart
+	end
+	if box.viewStart + box.viewSpan > runStart + fullSpan then
+		box.viewStart = runStart + fullSpan - box.viewSpan
+	end
+	if box.viewStart > runEnd then
+		box.viewStart = runEnd
+	end
+	local viewStart = box.viewStart
+	local viewSpan = box.viewSpan
+	local viewEnd = viewStart + viewSpan
+	local visMax = 0
+	local i
+	for i = 1, sn do
+		local pt = series[i]
+		if (pt.t or 0) >= viewStart - 0.01 and (pt.t or 0) <= viewEnd + 0.01 then
+			if (pt.r or 0) > visMax then
+				visMax = pt.r or 0
+			end
+		end
+	end
+	local axis = box.axisMax or 0
+	local want = niceCeil(visMax * 1.08)
+	if want > axis then
+		axis = want
+	elseif axis > 0 and visMax > 0 and visMax < axis * 0.4 then
+		axis = want
+	elseif axis <= 0 then
+		axis = want
+	end
+	box.axisMax = axis
+	local function fmtAxis(v)
+		-- Whole numbers only — keeps the left gutter tight.
+		local n = math.floor((v or 0) + 0.5)
+		if n >= 1000000 then
+			return math.floor(n / 1000000 + 0.5) .. "m"
+		elseif n >= 1000 then
+			return math.floor(n / 1000 + 0.5) .. "k"
+		end
+		return tostring(n)
+	end
+	if box.compact then
+		box.axis[1]:SetText("")
+		box.axis[2]:SetText("")
+		box.axis[3]:SetText("")
+		box.timeLeft:SetText("")
+		box.timeMid:SetText("")
+		box.timeRight:SetText("")
+	else
+		box.axis[1]:ClearAllPoints()
+		box.axis[1]:SetPoint("TOPRIGHT", box.plot, "TOPLEFT", -3, -2)
+		box.axis[1]:SetText(fmtAxis(axis))
+		box.axis[2]:ClearAllPoints()
+		box.axis[2]:SetPoint("RIGHT", box.plot, "LEFT", -3, 0)
+		box.axis[2]:SetText(fmtAxis(axis / 2))
+		box.axis[3]:ClearAllPoints()
+		box.axis[3]:SetPoint("BOTTOMRIGHT", box.plot, "BOTTOMLEFT", -3, 2)
+		box.axis[3]:SetText("0")
+		box.timeLeft:SetText(clock(viewStart))
+		box.timeMid:SetText(clock(viewStart + viewSpan / 2))
+		box.timeRight:SetText(clock(viewEnd))
+	end
+	local plot = box.plot
+	-- Anchored width/height: GetWidth() is often short before the next layout pass.
+	-- Full: plot TOPLEFT 36,-26 / BOTTOMRIGHT -10,34. Compact: flush under header.
+	local plotW
+	local plotH
+	if box.compact then
+		plotW = (box:GetWidth() or 380) - 6
+		plotH = (box:GetHeight() or 210) - 20
+	else
+		plotW = (box:GetWidth() or 380) - 46
+		plotH = (box:GetHeight() or 210) - 60
+	end
+	if plotW < 80 then
+		plotW = 80
+	end
+	if plotH < 40 then
+		plotH = 40
+	elseif (not box.compact) and plotH < 60 then
+		plotH = 60
+	end
+	-- Line is drawn inside the inset clip; keep those coords for stamps.
+	local drawW = plotW - 4
+	local drawH = plotH - 4
+	if drawW < 76 then
+		drawW = 76
+	end
+	if drawH < 56 then
+		drawH = 56
+	end
+	box.framePlotW = plotW
+	box.framePlotH = plotH
+	box.plotW = drawW
+	box.plotH = drawH
+	if box.stampHost then
+		box.stampHost:SetWidth(drawW)
+		box.stampHost:SetHeight(drawH)
+	end
+	local yMin = 1
+	local yMax = drawH - 1
+	if yMax < yMin then
+		yMax = yMin
+	end
+	local innerH = yMax - yMin
+	box.guides[1]:ClearAllPoints()
+	box.guides[1]:SetPoint("BOTTOMLEFT", plot, "BOTTOMLEFT", 2, 2 + (plotH - 4) * 0.75)
+	box.guides[1]:SetPoint("BOTTOMRIGHT", plot, "BOTTOMRIGHT", -2, 2 + (plotH - 4) * 0.75)
+	box.guides[1]:Show()
+	box.guides[2]:ClearAllPoints()
+	box.guides[2]:SetPoint("BOTTOMLEFT", plot, "BOTTOMLEFT", 2, 2 + (plotH - 4) * 0.5)
+	box.guides[2]:SetPoint("BOTTOMRIGHT", plot, "BOTTOMRIGHT", -2, 2 + (plotH - 4) * 0.5)
+	box.guides[2]:Show()
+	if box.cols then
+		local oi
+		for oi = 1, table.getn(box.cols) do
+			box.cols[oi]:Hide()
+		end
+	end
+	if box.caps then
+		local oi
+		for oi = 1, table.getn(box.caps) do
+			box.caps[oi]:Hide()
+		end
+	end
+	clearStamps(box)
+	-- Fixed pixel columns + fractional AA. Cap is generous; lower-end PCs may
+	-- hitch while the graph is open and redrawing.
+	local points = {}
+	local pc = 0
+	local colN = math.floor(drawW * 2)
+	if colN < 64 then
+		colN = 64
+	elseif colN > 900 then
+		colN = 900
+	end
+	local ci
+	for ci = 0, colN - 1 do
+		local u = (ci + 0.5) / colN
+		local t = viewStart + u * viewSpan
+		local rate = rateAt(series, t)
+		local x = u * (drawW - 1)
+		local y = yMin
+		if axis > 0 and innerH > 0 then
+			y = yMin + innerH * (rate / axis)
+		end
+		if y < yMin then
+			y = yMin
+		elseif y > yMax then
+			y = yMax
+		end
+		pc = pc + 1
+		points[pc] = { x = x, y = y, t = t }
+	end
+	local li
+	for li = 2, pc do
+		stroke(box, plot, points[li - 1].x, points[li - 1].y, points[li].x, points[li].y)
+	end
+	local railW = plotW
+	local railSpan = fullSpan
+	local thumbLeft = 0
+	local thumbWide = railW
+	if railSpan > 0 then
+		thumbLeft = ((viewStart - runStart) / railSpan) * railW
+		thumbWide = (viewSpan / railSpan) * railW
+	end
+	if thumbWide < 8 then
+		thumbWide = 8
+	end
+	if thumbLeft < 0 then
+		thumbLeft = 0
+	end
+	if thumbLeft + thumbWide > railW then
+		thumbLeft = railW - thumbWide
+	end
+	if box.compact then
+		if box.thumb then
+			box.thumb:Hide()
+		end
+		if box.liveMark then
+			box.liveMark:Hide()
+		end
+	else
+		box.thumb:ClearAllPoints()
+		box.thumb:SetPoint("LEFT", box.rail, "LEFT", thumbLeft, 0)
+		box.thumb:SetWidth(thumbWide)
+		box.thumb:SetHeight(8)
+		box.thumb:Show()
+		local liveU = 1
+		if railSpan > 0 then
+			liveU = (runEnd - runStart) / railSpan
+			if liveU < 0 then
+				liveU = 0
+			elseif liveU > 1 then
+				liveU = 1
+			end
+		end
+		box.liveMark:ClearAllPoints()
+		box.liveMark:SetPoint("TOPLEFT", box.rail, "TOPLEFT", liveU * railW - 1, -1)
+		box.liveMark:SetPoint("BOTTOMLEFT", box.rail, "BOTTOMLEFT", liveU * railW - 1, 1)
+		box.liveMark:Show()
+	end
+	box:Show()
+	raiseOverCards(box)
+	box.painting = false
+end
+
 local tipFill
 local tipOwner
 
@@ -3632,7 +5912,7 @@ local function hideTip()
 	end
 end
 
-local function leaveTip()
+leaveTip = function()
 	if tipOwner == this then
 		hideTip()
 	end
@@ -3740,7 +6020,7 @@ local function paintTip(title, icon, lines)
 	placeTip()
 end
 
-local function showTip(owner, side, title, icon, lines)
+showTip = function(owner, side, title, icon, lines)
 	tipOwner = owner
 	tipFill = nil
 	paintTip(title, icon, lines)
@@ -3911,6 +6191,9 @@ local function showHeaderTip(kind, mode)
 		if text then
 			push("Echo " .. text)
 		end
+	end
+	if state and (state.best or 0) > 0 and table.getn(lines) < 12 then
+		lines[table.getn(lines) + 1] = { "Biggest crit " .. comma(state.best), 1, 0.82, 0.45 }
 	end
 	showTip(this, "LEFT", title, nil, lines)
 end
@@ -4083,8 +6366,11 @@ local function createRow(parent, index)
 				{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
 				{ string.format("%s %s", rateWord, fmtRate(data.dps or 0)), 0.7, 0.92, 0.68 },
 			}
-			if killView and not data.noKill and not data.child and not isProc(data.proc) and not data.cast then
+			if killView and not data.noKill and not data.ownSpell and not isProc(data.proc) and not data.cast and (not data.child or (data.kills or 0) > 0) then
 				table.insert(lines, { string.format("Kills %d", data.kills or 0), 1, 0.82, 0.45 })
+			end
+			if not data.child and (data.best or 0) > 0 and table.getn(lines) < 12 then
+				table.insert(lines, { "Biggest crit " .. comma(data.best), 1, 0.82, 0.45 })
 			end
 			local landed = data.hits or 0
 			local crits = data.crits or 0
@@ -4101,13 +6387,15 @@ local function createRow(parent, index)
 				end
 				table.insert(lines, { topLine, 0.75, 0.85, 1 })
 			end
-			if data.child then
+			if data.ownSpell then
+				table.insert(lines, { "This spell, without the talents and items grouped into it.", 0.65, 0.78, 1 })
+			elseif data.child then
 				local into = "Grouped into the spell above."
 				if data.parentName and data.parentName ~= "" then
 					into = "Grouped into " .. data.parentName .. "."
 				end
 				table.insert(lines, { into, 0.65, 0.78, 1 })
-				if killView and data.parentName and data.parentName ~= "" then
+				if killView and not data.summon and data.parentName and data.parentName ~= "" then
 					table.insert(lines, { "Kills for this are counted on " .. data.parentName .. ".", 0.75, 0.75, 0.75 })
 				end
 			elseif data.procs and data.procs[1] then
@@ -4133,7 +6421,7 @@ local function createRow(parent, index)
 			if not data.classKey then
 				tipIcon = rowIcon(data)
 			end
-			paintTip(data.name, tipIcon, lines)
+			paintTip(data.shown or data.name, tipIcon, lines)
 		end)
 	end)
 	row:SetScript("OnLeave", function()
@@ -4401,18 +6689,25 @@ local function applyLook(buttons)
 					savePoint()
 				elseif win.fixed then
 					savePop(win)
+				elseif win.graphMode then
+					saveGraphSlot(win)
 				end
 			end
 		end
 	end
 	paintWin(frame, pa)
 	paintWin(bubble, pa)
+	local gMode, gBox
+	for gMode, gBox in pairs(graphBoxes) do
+		paintWin(gBox, pa)
+	end
 	local mode, pop
 	for mode, pop in pairs(popped) do
 		paintWin(pop, pa)
 		if buttons then
 			paintBorder(pop.closeBtn, brdR, brdG, brdB)
 			paintBorder(pop.resetBtn, brdR, brdG, brdB)
+			paintBorder(pop.graphBtn, brdR, brdG, brdB)
 		end
 	end
 	if frame and frame.tip then
@@ -4458,6 +6753,8 @@ local function applyLook(buttons)
 		paintBorder(frame.minBtn, brdR, brdG, brdB)
 		paintBorder(frame.resetBtn, brdR, brdG, brdB)
 		paintBorder(frame.setBtn, brdR, brdG, brdB)
+		paintBorder(frame.graphBtn, brdR, brdG, brdB)
+		paintBorder(frame.popBtn, brdR, brdG, brdB)
 		paintBorder(bubble, brdR, brdG, brdB)
 	end
 end
@@ -4491,7 +6788,7 @@ createDetached = function(mode)
 	win:SetBackdropBorderColor(0.78, 0.58, 0.22, 1)
 	placePop(win)
 
-	local header = CreateFrame("Button", nil, win)
+	local header = CreateFrame("Button", "AZSSpellMeter" .. mode .. "Header", win)
 	header:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -6)
 	header:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -6)
 	header:SetHeight(16)
@@ -4515,28 +6812,20 @@ createDetached = function(mode)
 	header:SetScript("OnDragStart", startWinDrag)
 	header:SetScript("OnDragStop", stopWinDrag)
 
-	local brandBack = header:CreateTexture(nil, "ARTWORK")
-	brandBack:SetTexture(K.SOLID)
-	brandBack:SetVertexColor(0, 0, 0, 0.55)
-	brandBack:SetWidth(14)
-	brandBack:SetHeight(14)
-	brandBack:SetPoint("LEFT", header, "LEFT", 2, 0)
-	local brand = header:CreateTexture(nil, "OVERLAY")
-	brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
-	brand:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-	brand:SetWidth(12)
-	brand:SetHeight(12)
-	brand:SetPoint("CENTER", brandBack, "CENTER", 0, 0)
-	win.brand = brand
+	local brandIcon = makeBrandIcon(header, "AZSSpellMeter" .. mode .. "Brand")
+	brandIcon:SetPoint("LEFT", header, "LEFT", 2, 0)
+	win.brandIcon = brandIcon
+	win.brandBack = brandIcon.back
+	win.brand = brandIcon.icon
 	local brandText = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	brandText:SetPoint("LEFT", brandBack, "RIGHT", 4, 0)
+	brandText:SetPoint("LEFT", brandIcon, "RIGHT", 4, 0)
 	brandText:SetJustifyH("LEFT")
 	brandText:SetText(VIEW_TITLE[mode] or "Spell Meter")
 	face(brandText, 10)
 	brandText:SetTextColor(1, 0.9, 0.62)
 	win.brandText = brandText
 
-	local closeBtn = CreateFrame("Button", nil, header)
+	local closeBtn = CreateFrame("Button", "AZSSpellMeter" .. mode .. "Close", header)
 	closeBtn:SetPoint("RIGHT", header, "RIGHT", -3, 0)
 	closeBtn:SetWidth(14)
 	closeBtn:SetHeight(14)
@@ -4559,7 +6848,7 @@ createDetached = function(mode)
 	end)
 	win.closeBtn = closeBtn
 
-	local resetBtn = CreateFrame("Button", nil, header)
+	local resetBtn = CreateFrame("Button", "AZSSpellMeter" .. mode .. "Reset", header)
 	resetBtn:SetPoint("RIGHT", closeBtn, "LEFT", -4, 0)
 	resetBtn:SetHeight(14)
 	resetBtn:SetWidth(42)
@@ -4567,10 +6856,11 @@ createDetached = function(mode)
 	resetBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
 	resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
 	local resetText = resetBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0)
+	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0.5)
 	resetText:SetText("Reset")
 	face(resetText, 9)
 	resetText:SetTextColor(1, 0.86, 0.5)
+	win.resetText = resetText
 	resetBtn:SetScript("OnClick", function()
 		windowReset(false, mode)
 		refresh()
@@ -4596,9 +6886,34 @@ createDetached = function(mode)
 	end)
 	win.resetBtn = resetBtn
 
-	local dpsBtn = CreateFrame("Button", nil, header)
-	dpsBtn:SetPoint("RIGHT", resetBtn, "LEFT", -8, 0)
-	dpsBtn:SetWidth(52)
+	local graphBtn = makeChromeIcon(header, "AZSSpellMeter" .. mode .. "GraphBtn")
+	graphBtn:SetPoint("RIGHT", resetBtn, "LEFT", -4, 0)
+	paintSparkIcon(graphBtn)
+	graphBtn:SetScript("OnClick", function()
+		setGraphOpen(mode, not isGraphOpen(mode))
+		refresh()
+	end)
+	graphBtn:SetScript("OnEnter", function()
+		graphBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		local title = VIEW_TITLE[mode] or "Graph"
+		local line = "Open the " .. string.lower(title) .. " graph."
+		if isGraphOpen(mode) then
+			line = "Close the " .. string.lower(title) .. " graph."
+		end
+		showTip(this, "RIGHT", title .. " graph", nil, {
+			{ line, 1, 1, 1 },
+			{ "Each view can have its own graph open at the same time.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	graphBtn:SetScript("OnLeave", function()
+		applyLook(true)
+		leaveTip()
+	end)
+	win.graphBtn = graphBtn
+
+	local dpsBtn = CreateFrame("Button", "AZSSpellMeter" .. mode .. "Dps", header)
+	dpsBtn:SetPoint("RIGHT", graphBtn, "LEFT", -8, 0)
+	dpsBtn:SetWidth(48)
 	dpsBtn:SetHeight(16)
 	local dpsText = dpsBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	dpsText:SetPoint("RIGHT", dpsBtn, "RIGHT", 0, 0)
@@ -4618,8 +6933,8 @@ createDetached = function(mode)
 		leaveTip()
 	end)
 
-	local totalBtn = CreateFrame("Button", nil, header)
-	totalBtn:SetPoint("RIGHT", dpsBtn, "LEFT", -10, 0)
+	local totalBtn = CreateFrame("Button", "AZSSpellMeter" .. mode .. "Total", header)
+	totalBtn:SetPoint("RIGHT", dpsBtn, "LEFT", -4, 0)
 	totalBtn:SetWidth(48)
 	totalBtn:SetHeight(16)
 	local totalText = totalBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -4639,7 +6954,6 @@ createDetached = function(mode)
 	totalBtn:SetScript("OnLeave", function()
 		leaveTip()
 	end)
-	brandText:SetPoint("RIGHT", totalBtn, "LEFT", -8, 0)
 
 	local cols = CreateFrame("Frame", nil, win)
 	cols:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -(K.DETACH_H - K.COL_H))
@@ -4764,6 +7078,10 @@ createDetached = function(mode)
 	resetBtn:SetScript("OnMouseWheel", onWheel)
 	closeBtn:EnableMouseWheel(true)
 	closeBtn:SetScript("OnMouseWheel", onWheel)
+	if win.graphBtn then
+		win.graphBtn:EnableMouseWheel(true)
+		win.graphBtn:SetScript("OnMouseWheel", onWheel)
+	end
 
 	local grip = CreateFrame("Button", nil, win)
 	grip:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -2, 2)
@@ -4861,6 +7179,7 @@ detach = function(mode)
 	end
 	if popped[mode] then
 		popped[mode]:Show()
+		raiseOverCards(popped[mode])
 		refresh()
 		return
 	end
@@ -4881,6 +7200,7 @@ detach = function(mode)
 	end
 	popped[mode] = win
 	win:Show()
+	raiseOverCards(win)
 	applyLook(true)
 	win.needNudge = true
 	if clampIntoView(win) then
@@ -4924,7 +7244,7 @@ local function restorePops()
 	end
 end
 
-local function finishMainSize()
+function finishMainSize()
 	if not sizing then
 		return
 	end
@@ -4939,7 +7259,7 @@ local function finishMainSize()
 	refresh()
 end
 
-local function onMainGripDown()
+function onMainGripDown()
 	if config().locked then
 		return
 	end
@@ -4956,12 +7276,25 @@ local function onMainGripDown()
 	pinTopLeft()
 end
 
-local function onMainWheel()
+function onMainWheel()
 	scroll = scroll - (arg1 or 0) * K.ROW_H
 	refresh()
 end
 
 local function onMainUpdate()
+	if choiceHold and frame then
+		frame.cardWake = (frame.cardWake or 0) + (arg1 or 0)
+		if frame.cardWake >= 0.4 then
+			frame.cardWake = 0
+			raiseOverCards(frame)
+			local mode, pop
+			for mode, pop in pairs(popped) do
+				if pop:IsShown() then
+					raiseOverCards(pop)
+				end
+			end
+		end
+	end
 	if sizing then
 		if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
 			finishMainSize()
@@ -5019,13 +7352,8 @@ local function onMainUpdate()
 		checkLevel()
 		refresh()
 	end
-	frame.tick = (frame.tick or 0) + (arg1 or 0)
-	if frame.tick >= 0.2 then
-		frame.tick = 0
-		if frame:IsShown() then
-			refresh()
-		end
-	end
+	-- Meter refresh / DPS sampling is owned by the driver so the graph trail
+	-- keeps moving even when this window or the graph pane is hidden.
 	if tipFill then
 		tipFill()
 	end
@@ -5058,21 +7386,13 @@ local function onBubbleUpdate()
 	if config().mini and bubble.parked and not bubble.moving and clampIntoView(bubble, 36, 18) then
 		noteClamped()
 	end
-	if not config().mini then
-		return
-	end
-	bubble.tick = (bubble.tick or 0) + (arg1 or 0)
-	if bubble.tick >= 0.2 then
-		bubble.tick = 0
-		refresh()
-	end
 end
 
 local function buildSettings()
 	local box = CreateFrame("Frame", "AZSSpellMeterSettings", UIParent)
 	settings = box
 	box:SetWidth(248)
-	box:SetHeight(640)
+	box:SetHeight(662)
 	box:SetFrameStrata("DIALOG")
 	box:SetMovable(true)
 	box:EnableMouse(true)
@@ -5090,7 +7410,7 @@ local function buildSettings()
 		table.insert(UISpecialFrames, "AZSSpellMeterSettings")
 	end
 
-	local header = CreateFrame("Button", nil, box)
+	local header = CreateFrame("Button", "AZSSpellMeterSettingsHeader", box)
 	header:SetPoint("TOPLEFT", box, "TOPLEFT", 8, -6)
 	header:SetPoint("TOPRIGHT", box, "TOPRIGHT", -8, -6)
 	header:SetHeight(16)
@@ -5136,7 +7456,7 @@ local function buildSettings()
 	title:SetText("Settings")
 	face(title, 10)
 	title:SetTextColor(1, 0.9, 0.62)
-	local closeBtn = CreateFrame("Button", nil, header)
+	local closeBtn = CreateFrame("Button", "AZSSpellMeterSettingsClose", header)
 	closeBtn:SetPoint("RIGHT", header, "RIGHT", -3, 0)
 	closeBtn:SetWidth(14)
 	closeBtn:SetHeight(14)
@@ -5295,24 +7615,25 @@ local function buildSettings()
 	sectionTitle(-184, "DPS")
 	local dpsAllHit = makeCheck(-240, "Since the start")
 	box.dpsAllMark = dpsAllHit.mark
+	box.graphHit = makeCheck(-258, "DPS graph")
 
-	sectionTitle(-266, "Rows")
-	local flatHit = makeCheck(-284, "Each spell alone")
+	sectionTitle(-284, "Rows")
+	local flatHit = makeCheck(-302, "Each spell alone")
 	box.flatMark = flatHit.mark
-	local detailHit = makeCheck(-302, "Under the spell")
+	local detailHit = makeCheck(-320, "Under the spell")
 	box.detailMark = detailHit.mark
-	local wrapHit = makeCheck(-320, "Wrap names")
+	local wrapHit = makeCheck(-338, "Wrap names")
 	box.wrapMark = wrapHit.mark
-	local cdHit = makeCheck(-338, "Cooldown bars")
+	local cdHit = makeCheck(-356, "Cooldown bars")
 	box.cdMark = cdHit.mark
 
-	sectionTitle(-368, "Columns")
-	local colKillHit = makeCheck(-386, "Kills", 12, 110)
-	local colDmgHit = makeCheck(-386, "Damage", 124, 110)
-	local colShareHit = makeCheck(-404, "Share", 12, 110)
-	local colDpsHit = makeCheck(-404, "DPS", 124, 110)
+	sectionTitle(-378, "Columns")
+	local colKillHit = makeCheck(-396, "Kills", 12, 110)
+	local colDmgHit = makeCheck(-396, "Amount", 124, 110)
+	local colShareHit = makeCheck(-414, "Share", 12, 110)
+	local colDpsHit = makeCheck(-414, "DPS", 124, 110)
 
-	sectionTitle(-426, "Colors")
+	sectionTitle(-436, "Colors")
 
 	local picks = {
 		{ key = "panel", name = "Window", tip = "Background of the meter windows." },
@@ -5333,7 +7654,7 @@ local function buildSettings()
 		local b = CreateFrame("Button", nil, box)
 		b:SetWidth(sw)
 		b:SetHeight(sw)
-		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -444)
+		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -454)
 		b:SetBackdrop(roundBackdrop(8))
 		b.key = spec.key
 		b.pickName = spec.name
@@ -5355,15 +7676,15 @@ local function buildSettings()
 	end
 
 	local caption = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -472)
+	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -482)
 	caption:SetText("Window")
 	face(caption, 10)
 	caption:SetTextColor(1, 0.9, 0.62)
 	box.caption = caption
 
-	local redSlider, redValue, redName = makeSlider(-490, "Red", 0, 255, 1)
-	local greenSlider, greenValue, greenName = makeSlider(-522, "Green", 0, 255, 1)
-	local blueSlider, blueValue, blueName = makeSlider(-554, "Blue", 0, 255, 1)
+	local redSlider, redValue, redName = makeSlider(-500, "Red", 0, 255, 1)
+	local greenSlider, greenValue, greenName = makeSlider(-532, "Green", 0, 255, 1)
+	local blueSlider, blueValue, blueName = makeSlider(-564, "Blue", 0, 255, 1)
 	redName:SetTextColor(1, 0.55, 0.45)
 	greenName:SetTextColor(0.55, 0.9, 0.55)
 	blueName:SetTextColor(0.55, 0.75, 1)
@@ -5374,7 +7695,7 @@ local function buildSettings()
 	box.greenValue = greenValue
 	box.blueValue = blueValue
 
-	local resetBtn = CreateFrame("Button", nil, box)
+	local resetBtn = CreateFrame("Button", "AZSSpellMeterSettingsReset", box)
 	resetBtn:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", 12, 10)
 	resetBtn:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -12, 10)
 	resetBtn:SetHeight(18)
@@ -5382,7 +7703,7 @@ local function buildSettings()
 	resetBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
 	resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
 	local resetText = resetBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0)
+	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0.5)
 	resetText:SetText("Reset settings")
 	face(resetText, 10)
 	resetText:SetTextColor(1, 0.86, 0.5)
@@ -5404,7 +7725,7 @@ local function buildSettings()
 		local op = snap(pa * 100, 1, 0, 100)
 		opSlider:SetValue(op)
 		opValue:SetText(op .. "%")
-		local window = snap(tonumber(lookValue("dps")) or 10, 5, 5, 120)
+		local window = snap(tonumber(lookValue("dps")) or 30, 5, 5, 120)
 		dpsSlider:SetValue(window)
 		if lookValue("dpsAll") then
 			dpsAllHit.mark:Show()
@@ -5448,6 +7769,11 @@ local function buildSettings()
 			wrapHit.mark:Show()
 		else
 			wrapHit.mark:Hide()
+		end
+		if anyGraphOpen() then
+			box.graphHit.mark:Show()
+		else
+			box.graphHit.mark:Hide()
 		end
 		local function showCol(hit, key)
 			if lookValue(key) == false then
@@ -5537,7 +7863,7 @@ local function buildSettings()
 		if box.quiet then
 			return
 		end
-		local window = snap(dpsSlider:GetValue() or 10, 5, 5, 120)
+		local window = snap(dpsSlider:GetValue() or 30, 5, 5, 120)
 		if math.abs((dpsSlider:GetValue() or window) - window) > 0.01 then
 			box.quiet = true
 			dpsSlider:SetValue(window)
@@ -5617,6 +7943,29 @@ local function buildSettings()
 		})
 	end)
 	dpsAllHit:SetScript("OnLeave", function()
+		leaveTip()
+	end)
+	box.graphHit:SetScript("OnClick", function()
+		ensureLook()
+		if anyGraphOpen() then
+			local saved = graphSlot("damage")
+			local mode
+			for mode, _ in pairs(saved.graphs) do
+				saved.graphs[mode] = nil
+			end
+		else
+			setGraphOpen("damage", true)
+		end
+		syncSettings()
+		refresh()
+	end)
+	box.graphHit:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "DPS graph", nil, {
+			{ "A line of DPS or amount over the run. Scroll to zoom, drag to pan, hover for a value.", 1, 1, 1 },
+			{ "Use the chart icon on each tab to open that view's graph. Several can stay open at once.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	box.graphHit:SetScript("OnLeave", function()
 		leaveTip()
 	end)
 	cdHit:SetScript("OnClick", function()
@@ -5742,7 +8091,7 @@ local function buildSettings()
 		end)
 	end
 	bindCol(colKillHit, "colKill", "Kills", "Show or hide the kill count.")
-	bindCol(colDmgHit, "colDmg", "Damage", "Show or hide the damage numbers.")
+	bindCol(colDmgHit, "colDmg", "Amount", "Show or hide the damage, healing, or taken numbers.")
 	bindCol(colShareHit, "colShare", "Share", "Show or hide each spell's part of the total.")
 	bindCol(colDpsHit, "colDps", "DPS", "Show or hide the DPS numbers.")
 
@@ -5814,6 +8163,7 @@ local function toggleSettings()
 	end
 	settings.needNudge = true
 	settings:Show()
+	raiseOverCards(settings)
 end
 
 local function buildMainChrome()
@@ -5868,7 +8218,7 @@ local function buildMainChrome()
 	end
 	frame:SetPoint(cfg.point or "TOPLEFT", UIParent, cfg.rel or "TOPLEFT", cfg.x or 16, cfg.y or -160)
 
-	local header = CreateFrame("Button", nil, frame)
+	local header = CreateFrame("Button", "AZSSpellMeterHeader", frame)
 	header:SetPoint("TOPLEFT", frame, "TOPLEFT", 8, -6)
 	header:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -6)
 	header:SetHeight(16)
@@ -5892,21 +8242,13 @@ local function buildMainChrome()
 	header:SetScript("OnDragStart", startFrameDrag)
 	header:SetScript("OnDragStop", stopFrameDrag)
 
-	local brandBack = header:CreateTexture(nil, "ARTWORK")
-	brandBack:SetTexture(K.SOLID)
-	brandBack:SetVertexColor(0, 0, 0, 0.55)
-	brandBack:SetWidth(14)
-	brandBack:SetHeight(14)
-	brandBack:SetPoint("LEFT", header, "LEFT", 2, 0)
-	local brand = header:CreateTexture(nil, "OVERLAY")
-	brand:SetTexture("Interface\\Icons\\INV_Misc_Book_09")
-	brand:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-	brand:SetWidth(12)
-	brand:SetHeight(12)
-	brand:SetPoint("CENTER", brandBack, "CENTER", 0, 0)
-	frame.brand = brand
+	local brandIcon = makeBrandIcon(header, "AZSSpellMeterBrand")
+	brandIcon:SetPoint("LEFT", header, "LEFT", 2, 0)
+	frame.brandIcon = brandIcon
+	frame.brandBack = brandIcon.back
+	frame.brand = brandIcon.icon
 	local brandText = header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	brandText:SetPoint("LEFT", brandBack, "RIGHT", 4, 0)
+	brandText:SetPoint("LEFT", brandIcon, "RIGHT", 4, 0)
 	brandText:SetJustifyH("LEFT")
 	brandText:SetText("Spell Meter")
 	face(brandText, 10)
@@ -5938,7 +8280,7 @@ local function buildMainChrome()
 		btn.er, btn.eg, btn.eb = spec.er, spec.eg, spec.eb
 		btn:SetBackdrop(roundBackdrop(8))
 		local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		label:SetPoint("CENTER", btn, "CENTER", 0, 0)
+		label:SetPoint("CENTER", btn, "CENTER", 0, 0.5)
 		label:SetText(spec.text)
 		face(label, 9)
 		btn.label = label
@@ -5970,7 +8312,7 @@ local function buildMainChrome()
 			if config().view ~= this.mode and not popped[this.mode] then
 				this:SetBackdropBorderColor(0.72, 0.56, 0.24, 1)
 			end
-			local extra = "Right-click to open it in its own window."
+			local extra = "Use the header chart and window buttons, or right-click to pop out."
 			if popped[this.mode] then
 				extra = "Click to bring it back into this window."
 			end
@@ -5992,7 +8334,7 @@ local function buildMainChrome()
 		frame.modeBtns[msi] = btn
 	end
 
-	local minBtn = CreateFrame("Button", nil, header)
+	local minBtn = CreateFrame("Button", "AZSSpellMeterMin", header)
 	minBtn:SetPoint("RIGHT", header, "RIGHT", -3, 0)
 	minBtn:SetWidth(14)
 	minBtn:SetHeight(14)
@@ -6044,7 +8386,7 @@ local function buildMainChrome()
 	setBtn:SetScript("OnEnter", function()
 		setBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
 		showTip(this, "RIGHT", "Settings", nil, {
-			{ "Scale, DPS window, columns, colors, cooldown bars, and lock.", 1, 1, 1 },
+			{ "Scale, DPS window, graph, columns, colors, and lock.", 1, 1, 1 },
 		})
 	end)
 	setBtn:SetScript("OnLeave", function()
@@ -6053,15 +8395,72 @@ local function buildMainChrome()
 	end)
 	frame.setBtn = setBtn
 
-	local resetBtn = CreateFrame("Button", nil, header)
-	resetBtn:SetPoint("RIGHT", setBtn, "LEFT", -4, 0)
+	local popBtn = makeChromeIcon(header, "AZSSpellMeterPop")
+	popBtn:SetPoint("RIGHT", setBtn, "LEFT", -4, 0)
+	paintPopIcon(popBtn)
+	popBtn:SetScript("OnClick", function()
+		local mode = viewMode()
+		if popped[mode] then
+			dock(mode)
+		else
+			detach(mode)
+		end
+	end)
+	popBtn:SetScript("OnEnter", function()
+		popBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		local mode = viewMode()
+		local title = VIEW_TITLE[mode] or "View"
+		local line = "Open " .. string.lower(title) .. " in its own window."
+		if popped[mode] then
+			line = "Bring " .. string.lower(title) .. " back into the main window."
+		end
+		showTip(this, "RIGHT", title .. " window", nil, {
+			{ line, 1, 1, 1 },
+			{ "Same as right-clicking the tab.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	popBtn:SetScript("OnLeave", function()
+		applyLook(true)
+		leaveTip()
+	end)
+	frame.popBtn = popBtn
+
+	local graphBtn = makeChromeIcon(header, "AZSSpellMeterGraphBtn")
+	graphBtn:SetPoint("RIGHT", popBtn, "LEFT", -4, 0)
+	paintSparkIcon(graphBtn)
+	graphBtn:SetScript("OnClick", function()
+		local mode = viewMode()
+		setGraphOpen(mode, not isGraphOpen(mode))
+		refresh()
+	end)
+	graphBtn:SetScript("OnEnter", function()
+		graphBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
+		local mode = viewMode()
+		local title = VIEW_TITLE[mode] or "Graph"
+		local line = "Open the " .. string.lower(title) .. " graph."
+		if isGraphOpen(mode) then
+			line = "Close the " .. string.lower(title) .. " graph."
+		end
+		showTip(this, "RIGHT", title .. " graph", nil, {
+			{ line, 1, 1, 1 },
+			{ "Each view can have its own graph open at the same time.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	graphBtn:SetScript("OnLeave", function()
+		applyLook(true)
+		leaveTip()
+	end)
+	frame.graphBtn = graphBtn
+
+	local resetBtn = CreateFrame("Button", "AZSSpellMeterReset", header)
+	resetBtn:SetPoint("RIGHT", graphBtn, "LEFT", -4, 0)
 	resetBtn:SetHeight(14)
 	resetBtn:SetWidth(42)
 	resetBtn:SetBackdrop(roundBackdrop(8))
 	resetBtn:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
 	resetBtn:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
 	local resetText = resetBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0)
+	resetText:SetPoint("CENTER", resetBtn, "CENTER", 0, 0.5)
 	resetText:SetText("Reset")
 	face(resetText, 9)
 	resetText:SetTextColor(1, 0.86, 0.5)
@@ -6092,8 +8491,9 @@ local function buildMainChrome()
 		leaveTip()
 	end)
 	frame.resetBtn = resetBtn
+	frame.resetText = resetText
 
-	local dpsBtn = CreateFrame("Button", nil, header)
+	local dpsBtn = CreateFrame("Button", "AZSSpellMeterDps", header)
 	dpsBtn:SetPoint("RIGHT", resetBtn, "LEFT", -8, 0)
 	dpsBtn:SetWidth(48)
 	dpsBtn:SetHeight(16)
@@ -6116,7 +8516,7 @@ local function buildMainChrome()
 	end)
 
 	local totalBtn = CreateFrame("Button", nil, header)
-	totalBtn:SetPoint("RIGHT", dpsBtn, "LEFT", -10, 0)
+	totalBtn:SetPoint("RIGHT", dpsBtn, "LEFT", -4, 0)
 	totalBtn:SetWidth(48)
 	totalBtn:SetHeight(16)
 	local totalText = totalBtn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -6127,9 +8527,6 @@ local function buildMainChrome()
 	totalText:SetTextColor(1, 0.9, 0.55)
 	frame.totalText = totalText
 	frame.totalBtn = totalBtn
-	if frame.brandText then
-		frame.brandText:SetPoint("RIGHT", totalBtn, "LEFT", -8, 0)
-	end
 	totalBtn:RegisterForDrag("LeftButton")
 	totalBtn:SetScript("OnDragStart", startFrameDrag)
 	totalBtn:SetScript("OnDragStop", stopFrameDrag)
@@ -6375,6 +8772,14 @@ local function buildMainList()
 	resetBtn:SetScript("OnMouseWheel", onMainWheel)
 	minBtn:EnableMouseWheel(true)
 	minBtn:SetScript("OnMouseWheel", onMainWheel)
+	if frame.graphBtn then
+		frame.graphBtn:EnableMouseWheel(true)
+		frame.graphBtn:SetScript("OnMouseWheel", onMainWheel)
+	end
+	if frame.popBtn then
+		frame.popBtn:EnableMouseWheel(true)
+		frame.popBtn:SetScript("OnMouseWheel", onMainWheel)
+	end
 	frame:SetScript("OnUpdate", onMainUpdate)
 
 	bubble = CreateFrame("Button", "AZSSpellMeterBubble", UIParent)
@@ -6580,21 +8985,21 @@ driver:RegisterEvent("CHAT_MSG_SPELL_PET_DAMAGE")
 driver:RegisterEvent("CHAT_MSG_COMBAT_PET_HITS")
 driver:SetScript("OnEvent", onEvent)
 driver:SetScript("OnUpdate", function()
-	if (frame and frame:IsShown()) or (bubble and bubble:IsShown()) then
-		return
-	end
-	if not anyMeterShown() then
-		return
-	end
 	driver.tick = (driver.tick or 0) + (arg1 or 0)
 	if driver.tick < 0.2 then
 		return
 	end
 	driver.tick = 0
+	if not state then
+		return
+	end
+	-- Always pulse. The DPS graph trail must keep sampling while the graph
+	-- window is closed; tying refresh to a visible meter pane left holes that
+	-- drew as straight diagonals when the graph was opened again.
 	refresh()
 end)
 
-local function toggleLock()
+function toggleLock()
 	local cfg = config()
 	cfg.locked = not cfg.locked
 	if settings and settings.lockMark then
@@ -6611,7 +9016,7 @@ local function toggleLock()
 	end
 end
 
-local function toggleShown()
+function toggleShown()
 	local cfg = config()
 	if frame:IsShown() or (bubble and bubble:IsShown()) then
 		cfg.shown = false
@@ -6628,7 +9033,7 @@ local function toggleShown()
 	end
 end
 
-local function loadTest()
+function loadTest()
 	resetData()
 	config().view = "damage"
 	testMeter = {

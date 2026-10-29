@@ -44,6 +44,23 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ## Changelog
 
+### 1.33
+
+Tested with game 0.127.0.
+
+- The meter, its extra windows, the bubble, graphs, and settings sit above level-up and item cards when the game provides AZS_SetOnTopOfScreens.
+- Choker of the Fire Lord groups onto Blast Wave, Eye of Hakkar onto Ignite, and Corpse Explosion onto Seed of Corruption.
+- Two or more minions fold into one Pets row you can open. One minion keeps its own name. An imp's hits and kills stay on Imp.
+- Death Coil and Hellfire are not folded onto a summon.
+- Opening a grouped spell shows that spell's own damage first, then the talent or item.
+- The amount column can be hidden on Healing and Taken too.
+- The biggest crit shows on the spell and on the total.
+- Each view can open its own graph from the chart button on the title bar. Several graphs can stay open at once.
+- The graph plots amount or DPS over the run. Scroll to zoom, drag to pan, and hover for a value at that time.
+- Follow keeps the live end in view. Full keeps the whole run in view. Compact hides the timeline and axis labels so the header sits flush on the plot.
+- Amount and DPS (or Healing and HPS) switch on the graph itself. The live number on the graph is for that graph's view.
+- UI tweaks and fixes.
+
 ### 1.32
 
 Tested with game 0.123.0.
