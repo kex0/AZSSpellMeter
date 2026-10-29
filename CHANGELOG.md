@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.34
+
+Tested with game 0.127.0.
+
+- Graphs hitch less during big AoE while they stay open. The line still updates live.
+
 ## 1.33
 
 Tested with game 0.127.0.

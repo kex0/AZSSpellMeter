@@ -750,9 +750,14 @@ local function recentRate(mode, now, total, bucket)
 		end
 	end
 	-- Keep the whole run for the graph. Thin older samples when the list grows large.
-	-- Also sample when the total moves, even if the run clock is briefly stuck.
+	-- Also sample when the total moves, even if the run clock is briefly stuck —
+	-- but never denser than 0.2s, or AoE floods the trail and the graph hitch.
 	local totalMoved = last and math.abs(total - (last.total or 0)) >= 1
-	if not clockBack and (not last or (now - last.t) >= 0.25 or totalMoved) then
+	local age = 0
+	if last then
+		age = now - (last.t or 0)
+	end
+	if not clockBack and (not last or age >= 0.25 or (totalMoved and age >= 0.2)) then
 		-- Anchor a zero so a burst that lands before the first sample still rates.
 		if n < 1 then
 			hist[1] = { t = now, total = 0, spells = {} }
@@ -4596,14 +4601,15 @@ function paintDpsGraph(win, hist, on, mode)
 		-- Same window as the meter's DPS (settings slider / "since the start").
 		local look = rateSeconds()
 		local fromStart = look < 5
+		local j = 1
 		local i
 		for i = 2, n do
 			local cur = samples[i]
 			local prev = samples[1]
 			if not fromStart then
-				local j = i
-				while j > 1 and ((cur.t or 0) - (samples[j].t or 0)) < look do
-					j = j - 1
+				-- Slide the lookback start forward once; do not walk back from i each time.
+				while j < i and ((cur.t or 0) - (samples[j + 1].t or 0)) >= look do
+					j = j + 1
 				end
 				prev = samples[j]
 			end
@@ -4619,31 +4625,38 @@ function paintDpsGraph(win, hist, on, mode)
 		end
 		return out
 	end
-	local function rateAt(series, t)
+	-- startI is the series index to resume from when t only moves forward (column walk).
+	local function rateAt(series, t, startI)
 		local n = table.getn(series)
 		if n < 1 then
-			return 0
+			return 0, 2
 		end
 		if t <= (series[1].t or 0) then
-			return series[1].r or 0
+			return series[1].r or 0, 2
 		end
 		if t >= (series[n].t or 0) then
-			return series[n].r or 0
+			return series[n].r or 0, n
 		end
-		local i
-		for i = 2, n do
-			local a = series[i - 1]
-			local b = series[i]
-			if t <= (b.t or 0) then
-				local span = (b.t or 0) - (a.t or 0)
-				if span < 0.001 then
-					return b.r or 0
-				end
-				local u = (t - (a.t or 0)) / span
-				return (a.r or 0) + ((b.r or 0) - (a.r or 0)) * u
-			end
+		local i = startI or 2
+		if i < 2 then
+			i = 2
+		elseif i > n then
+			i = n
 		end
-		return series[n].r or 0
+		while i <= n and (series[i].t or 0) < t do
+			i = i + 1
+		end
+		if i > n then
+			return series[n].r or 0, n
+		end
+		local a = series[i - 1]
+		local b = series[i]
+		local span = (b.t or 0) - (a.t or 0)
+		if span < 0.001 then
+			return b.r or 0, i
+		end
+		local u = (t - (a.t or 0)) / span
+		return (a.r or 0) + ((b.r or 0) - (a.r or 0)) * u, i
 	end
 	-- A true rotated line is not available on this client, so the path is drawn
 	-- with short overlapping stamps. Dense enough, it reads as one line.
@@ -4716,8 +4729,8 @@ function paintDpsGraph(win, hist, on, mode)
 		local steps = math.floor(dist * 1.5 + 0.5)
 		if steps < 1 then
 			steps = 1
-		elseif steps > 220 then
-			steps = 220
+		elseif steps > 80 then
+			steps = 80
 		end
 		local i
 		for i = 0, steps do
@@ -4967,6 +4980,7 @@ function paintDpsGraph(win, hist, on, mode)
 				saved = config().look
 			end
 			saved.graphAmount = box.showAmount
+			box.needDraw = true
 			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
 		end
 		amountBtn:SetScript("OnClick", function()
@@ -5168,6 +5182,7 @@ function paintDpsGraph(win, hist, on, mode)
 			end
 			box.sizing = false
 			saveGraphBox()
+			box.needDraw = true
 			paintDpsGraph(frame, rateHist[box.graphMode or box.mode or "damage"], true, box.graphMode or box.mode)
 		end)
 		box:SetScript("OnUpdate", function()
@@ -5177,6 +5192,7 @@ function paintDpsGraph(win, hist, on, mode)
 			if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
 				box.sizing = false
 				saveGraphBox()
+				box.needDraw = true
 				paintDpsGraph(frame, rateHist[box.graphMode or box.mode or "damage"], true, box.graphMode or box.mode)
 				return
 			end
@@ -5257,6 +5273,7 @@ function paintDpsGraph(win, hist, on, mode)
 			if not follow then
 				box.lockFull = false
 			end
+			box.needDraw = true
 			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
 		end
 		box.applyView = applyView
@@ -5567,6 +5584,7 @@ function paintDpsGraph(win, hist, on, mode)
 	-- level-up card briefly covers or reshuffles the window.
 	if not box.graphLive then
 		box.graphLive = true
+		box.needDraw = true
 		if not box.lockFull then
 			box.follow = true
 			box.viewStart = nil
@@ -5576,12 +5594,45 @@ function paintDpsGraph(win, hist, on, mode)
 	box.painting = true
 	box.mode = mode
 	box.graphMode = mode
-	applyGraphCompact(box)
 	if box.showAmount == nil then
 		local savedMetric = config().look
 		box.showAmount = savedMetric and savedMetric.graphAmount and true or false
 	end
 	local amountWord, rateWord = meterWords(mode)
+	local forceDraw = box.needDraw and true or false
+	box.needDraw = nil
+	local nowPaint = GetTime()
+	-- Cheap path: refresh the live number without rebuilding stamps.
+	if not forceDraw and box.lastFullPaint and (nowPaint - box.lastFullPaint) < 0.25 and box.series then
+		local quick = box.series
+		local qn = table.getn(quick)
+		local liveVal = 0
+		if box.showAmount then
+			local hn = hist and table.getn(hist) or 0
+			if hn >= 1 then
+				liveVal = hist[hn].total or 0
+			elseif qn >= 1 then
+				liveVal = quick[qn].r or 0
+			end
+		elseif qn >= 1 then
+			liveVal = quick[qn].r or 0
+		end
+		if box.showAmount then
+			box.rateText:SetText(comma(liveVal))
+		else
+			box.rateText:SetText(fmtRate(liveVal))
+		end
+		if box.rateBtn and box.rateText and box.rateText.GetStringWidth then
+			local rw = (box.rateText:GetStringWidth() or 24) + 4
+			if rw < 28 then
+				rw = 28
+			end
+			box.rateBtn:SetWidth(rw)
+		end
+		box:Show()
+		box.painting = false
+		return
+	end
 	local series = buildSeries(hist, box.showAmount)
 	box.series = series
 	local sn = table.getn(series)
@@ -5667,6 +5718,7 @@ function paintDpsGraph(win, hist, on, mode)
 		end
 		box:Show()
 		raiseOverCards(box)
+		box.lastFullPaint = GetTime()
 		box.painting = false
 		return
 	end
@@ -5820,21 +5872,23 @@ function paintDpsGraph(win, hist, on, mode)
 		end
 	end
 	clearStamps(box)
-	-- Fixed pixel columns + fractional AA. Cap is generous; lower-end PCs may
-	-- hitch while the graph is open and redrawing.
-	local points = {}
-	local pc = 0
+	-- Denser columns again (2x width), but still capped below the old 900 ceiling.
+	-- Adjacent columns plot a dot; only bridge real gaps with a stroke.
 	local colN = math.floor(drawW * 2)
 	if colN < 64 then
 		colN = 64
-	elseif colN > 900 then
-		colN = 900
+	elseif colN > 600 then
+		colN = 600
 	end
+	local si = 2
+	local prevX = nil
+	local prevY = nil
 	local ci
 	for ci = 0, colN - 1 do
 		local u = (ci + 0.5) / colN
 		local t = viewStart + u * viewSpan
-		local rate = rateAt(series, t)
+		local rate
+		rate, si = rateAt(series, t, si)
 		local x = u * (drawW - 1)
 		local y = yMin
 		if axis > 0 and innerH > 0 then
@@ -5845,12 +5899,21 @@ function paintDpsGraph(win, hist, on, mode)
 		elseif y > yMax then
 			y = yMax
 		end
-		pc = pc + 1
-		points[pc] = { x = x, y = y, t = t }
-	end
-	local li
-	for li = 2, pc do
-		stroke(box, plot, points[li - 1].x, points[li - 1].y, points[li].x, points[li].y)
+		if prevX == nil then
+			plotDot(box, plot, x, y)
+		else
+			local dx = x - prevX
+			if dx < 0 then
+				dx = -dx
+			end
+			if dx <= 1.5 then
+				plotDot(box, plot, x, y)
+			else
+				stroke(box, plot, prevX, prevY, x, y)
+			end
+		end
+		prevX = x
+		prevY = y
 	end
 	local railW = plotW
 	local railSpan = fullSpan
@@ -5898,6 +5961,7 @@ function paintDpsGraph(win, hist, on, mode)
 	end
 	box:Show()
 	raiseOverCards(box)
+	box.lastFullPaint = GetTime()
 	box.painting = false
 end
 
