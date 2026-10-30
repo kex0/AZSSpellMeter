@@ -44,6 +44,26 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ## Changelog
 
+### 1.35
+
+Tested with game 0.130.1.
+
+- UI scale in settings makes the meter, its extra windows, graphs, and tips smaller or bigger, from 50% to 200%. Settings itself uses the new size the next time you open it.
+- A graph can be dragged from the number on its title bar.
+- Numbers turn into 1.1k once they pass 999.
+- Sweeping Strikes, Flurry, Mutilate, Conflagrate, Shockwave, and Splitting Ice keep their own rows instead of vanishing into other spells.
+- Bars fill against the top spell by default. Settings can switch them back to the run total.
+- Hovering a spell row highlights the whole row.
+- Boss tips and hit stats are for that boss fight, not the whole run.
+- Settings can show or hide the Damage, Healing, Boss, and Taken buttons.
+- Settings no longer has a DPS graph checkbox. Open a graph from the chart button on a meter.
+- A compact graph shows the zoom in the top-left corner. The small R beside it returns to the DPS window from settings and follows the live end. Hovering R explains that, instead of the value at that time.
+- Warlock demons group under Minions. Inferno, Dread Lord, and Doomguard join that group. Dread Lord and Doomguard use their talent icons.
+- The Minions row shows up to six icons, in a fixed order, immediately after the name. When the row is too narrow, extras stack with a faint +N, and the tip shows each one in full. The kills column keeps a fixed width so those icons do not jump.
+- The Minions or Pets tip names who landed the biggest crit, and each pet tip shows its own.
+- Imp, Voidwalker, Succubus, and Infernal show hits, crits, and biggest crit. Imp Fireball and Infernal Hellfire are counted on the minion.
+- Hovering Dread Lord or Doomguard says their hits, crits, and kills are counted on Searing Pain or Shadow Bolt when you are also casting that spell. If that spell has no damage of yours, those stats are counted on the minion instead.
+
 ### 1.34
 
 Tested with game 0.127.0.
