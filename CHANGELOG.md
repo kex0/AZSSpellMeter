@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.36
+
+Tested with game 0.131.0.
+
+- Armor set bonuses that hit with a spell are counted on that spell. The set shows as an icon beside it, and the kills stay there. Judgement's bonus is already Judgement.
+- Spell names keep their full text when there is room before the numbers.
+- Each damage bar has a light top edge, a dark foot, and a gap under it. Each spell down the list is clearly darker than the one above it.
+- Settings can keep every bar the same brightness.
+- Hovering a spell raises that bar to the same brightness as the top spell.
+- A spell, item, or proc that can be upgraded shows its rank under the name, beside the icon.
+- When the window is too narrow for the class name, the total and DPS sit where that name was.
+- The graph opened from the main window follows the selected tab. A graph opened from a separate view stays on that view.
+- A sharp jump on the graph is a solid line.
+- Minions stay off a view when they added nothing to it. Healing, Boss, and Taken no longer keep a Minions row at zero.
+
 ## 1.35
 
 Tested with game 0.130.1.

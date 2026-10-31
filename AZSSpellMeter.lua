@@ -760,7 +760,24 @@ function setGraphOpen(mode, open)
 	saved.graph = nil
 end
 
+function isMainGraphOpen()
+	local saved = graphSlot("damage")
+	return saved.graphMain and true or false
+end
+
+function setMainGraphOpen(open)
+	local saved = graphSlot("damage")
+	if open then
+		saved.graphMain = true
+	else
+		saved.graphMain = nil
+	end
+end
+
 function anyGraphOpen()
+	if isMainGraphOpen() then
+		return true
+	end
 	local saved = graphSlot("damage")
 	local mode, on
 	for mode, on in pairs(saved.graphs) do
@@ -1179,7 +1196,568 @@ local PROC_CAST = {
 	["Choker of the Fire Lord"] = { "Blast Wave" },
 	["The Eye of Hakkar"] = { "Ignite" },
 	["Corpse Explosion"] = { "Seed of Corruption" },
+	-- Armor sets. The 8-piece hits with a spell, and the game reports those hits
+	-- under the set's name. onlyProc: that name is also a spell, so a normal
+	-- cast stays on its own row. Judgement's bonus is Judgement itself.
+	["Recruit's"] = { "Cleave" },
+	["Valor"] = { "Thunder Clap" },
+	["Might"] = { "Whirlwind" },
+	["Wrath"] = { "Bloodthirst", onlyProc = true },
+	["Dreadnaught"] = { "Execute" },
+	["Squire's"] = { "Hammer of Wrath" },
+	["Lightforge"] = { "Consecration" },
+	["Lawbringer"] = { "Holy Shock" },
+	["Redemption"] = { "Exorcism", onlyProc = true },
+	["Tracker's"] = { "Multi-Shot" },
+	["Beaststalker's"] = { "Serpent Sting" },
+	["Giantstalker's"] = { "Explosive Trap" },
+	["Dragonstalker's"] = { "Volley" },
+	["Cryptstalker"] = { "Aimed Shot" },
+	["Footpad's"] = { "Sinister Strike" },
+	["Shadowcraft"] = { "Rupture" },
+	["Nightslayer"] = { "Blade Flurry" },
+	["Bloodfang"] = { "Eviscerate" },
+	["Bonescythe"] = { "Sinister Strike", "Backstab" },
+	["Acolyte's"] = { "Smite" },
+	["Devout"] = { "Power Word: Shield" },
+	["Prophecy"] = { "Shadow Word: Pain" },
+	["Transcendence"] = { "Holy Nova" },
+	["Faith"] = { "Mind Blast" },
+	["Primal"] = { "Lightning Bolt" },
+	["Elements"] = { "Flame Shock" },
+	["Earthfury"] = { "Searing Totem" },
+	["Ten Storms"] = { "Chain Lightning" },
+	["Earthshatter"] = { "Fire Nova" },
+	["Apprentice's"] = { "Arcane Missiles" },
+	["Magister's"] = { "Arcane Explosion" },
+	["Arcanist"] = { "Flamestrike" },
+	["Netherwind"] = { "Blizzard" },
+	["Frostfire"] = { "Fireball" },
+	["Novice's"] = { "Shadow Bolt" },
+	["Dreadmist"] = { "Curse of Agony" },
+	["Felheart"] = { "Drain Life" },
+	["Nemesis"] = { "Rain of Fire" },
+	["Plagueheart"] = { "Corruption" },
+	["Thicket"] = { "Wrath" },
+	["Wildheart"] = { "Swipe" },
+	["Cenarion"] = { "Entangling Roots" },
+	["Stormrage"] = { "Starfire" },
+	["Dreamwalker"] = { "Hurricane" },
 }
+if AZSSpellMeterName then
+	if not AZSSpellMeterName["Rekruta"] then AZSSpellMeterName["Rekruta"] = "Recruit's" end
+	if not AZSSpellMeterName["Rekruten"] then AZSSpellMeterName["Rekruten"] = "Recruit's" end
+	if not AZSSpellMeterName["do Recruta"] then AZSSpellMeterName["do Recruta"] = "Recruit's" end
+	if not AZSSpellMeterName["de recluta"] then AZSSpellMeterName["de recluta"] = "Recruit's" end
+	if not AZSSpellMeterName["de recrue"] then AZSSpellMeterName["de recrue"] = "Recruit's" end
+	if not AZSSpellMeterName["Recrutului"] then AZSSpellMeterName["Recrutului"] = "Recruit's" end
+	if not AZSSpellMeterName["новобранца"] then AZSSpellMeterName["новобранца"] = "Recruit's" end
+	if not AZSSpellMeterName["новобранця"] then AZSSpellMeterName["новобранця"] = "Recruit's" end
+	if not AZSSpellMeterName["新兵"] then AZSSpellMeterName["新兵"] = "Recruit's" end
+	if not AZSSpellMeterName["신병의"] then AZSSpellMeterName["신병의"] = "Recruit's" end
+	if not AZSSpellMeterName["Męstwa"] then AZSSpellMeterName["Męstwa"] = "Valor" end
+	if not AZSSpellMeterName["Udatnosti"] then AZSSpellMeterName["Udatnosti"] = "Valor" end
+	if not AZSSpellMeterName["der Tapferkeit"] then AZSSpellMeterName["der Tapferkeit"] = "Valor" end
+	if not AZSSpellMeterName["do Valor"] then AZSSpellMeterName["do Valor"] = "Valor" end
+	if not AZSSpellMeterName["de valor"] then AZSSpellMeterName["de valor"] = "Valor" end
+	if not AZSSpellMeterName["de bravoure"] then AZSSpellMeterName["de bravoure"] = "Valor" end
+	if not AZSSpellMeterName["Vitejiei"] then AZSSpellMeterName["Vitejiei"] = "Valor" end
+	if not AZSSpellMeterName["доблести"] then AZSSpellMeterName["доблести"] = "Valor" end
+	if not AZSSpellMeterName["доблесті"] then AZSSpellMeterName["доблесті"] = "Valor" end
+	if not AZSSpellMeterName["勇气"] then AZSSpellMeterName["勇气"] = "Valor" end
+	if not AZSSpellMeterName["武勇"] then AZSSpellMeterName["武勇"] = "Valor" end
+	if not AZSSpellMeterName["용맹의"] then AZSSpellMeterName["용맹의"] = "Valor" end
+	if not AZSSpellMeterName["Mocy"] then AZSSpellMeterName["Mocy"] = "Might" end
+	if not AZSSpellMeterName["Síly"] then AZSSpellMeterName["Síly"] = "Might" end
+	if not AZSSpellMeterName["der Macht"] then AZSSpellMeterName["der Macht"] = "Might" end
+	if not AZSSpellMeterName["da Força"] then AZSSpellMeterName["da Força"] = "Might" end
+	if not AZSSpellMeterName["de poder"] then AZSSpellMeterName["de poder"] = "Might" end
+	if not AZSSpellMeterName["de puissance"] then AZSSpellMeterName["de puissance"] = "Might" end
+	if not AZSSpellMeterName["Puterii"] then AZSSpellMeterName["Puterii"] = "Might" end
+	if not AZSSpellMeterName["мощи"] then AZSSpellMeterName["мощи"] = "Might" end
+	if not AZSSpellMeterName["могутності"] then AZSSpellMeterName["могутності"] = "Might" end
+	if not AZSSpellMeterName["力量"] then AZSSpellMeterName["力量"] = "Might" end
+	if not AZSSpellMeterName["剛力"] then AZSSpellMeterName["剛力"] = "Might" end
+	if not AZSSpellMeterName["투지의"] then AZSSpellMeterName["투지의"] = "Might" end
+	if not AZSSpellMeterName["Gniewu"] then AZSSpellMeterName["Gniewu"] = "Wrath" end
+	if not AZSSpellMeterName["Hněvu"] then AZSSpellMeterName["Hněvu"] = "Wrath" end
+	if not AZSSpellMeterName["des Zorns"] then AZSSpellMeterName["des Zorns"] = "Wrath" end
+	if not AZSSpellMeterName["da Ira"] then AZSSpellMeterName["da Ira"] = "Wrath" end
+	if not AZSSpellMeterName["de cólera"] then AZSSpellMeterName["de cólera"] = "Wrath" end
+	if not AZSSpellMeterName["de courroux"] then AZSSpellMeterName["de courroux"] = "Wrath" end
+	if not AZSSpellMeterName["Mâniei"] then AZSSpellMeterName["Mâniei"] = "Wrath" end
+	if not AZSSpellMeterName["гнева"] then AZSSpellMeterName["гнева"] = "Wrath" end
+	if not AZSSpellMeterName["гніву"] then AZSSpellMeterName["гніву"] = "Wrath" end
+	if not AZSSpellMeterName["愤怒"] then AZSSpellMeterName["愤怒"] = "Wrath" end
+	if not AZSSpellMeterName["憤怒"] then AZSSpellMeterName["憤怒"] = "Wrath" end
+	if not AZSSpellMeterName["격노의"] then AZSSpellMeterName["격노의"] = "Wrath" end
+	if not AZSSpellMeterName["Pancernika"] then AZSSpellMeterName["Pancernika"] = "Dreadnaught" end
+	if not AZSSpellMeterName["Obrněnce"] then AZSSpellMeterName["Obrněnce"] = "Dreadnaught" end
+	if not AZSSpellMeterName["Schreckenspanzer"] then AZSSpellMeterName["Schreckenspanzer"] = "Dreadnaught" end
+	if not AZSSpellMeterName["do Couraçado"] then AZSSpellMeterName["do Couraçado"] = "Dreadnaught" end
+	if not AZSSpellMeterName["de acorazado"] then AZSSpellMeterName["de acorazado"] = "Dreadnaught" end
+	if not AZSSpellMeterName["de cuirassé"] then AZSSpellMeterName["de cuirassé"] = "Dreadnaught" end
+	if not AZSSpellMeterName["Neînfricatului"] then AZSSpellMeterName["Neînfricatului"] = "Dreadnaught" end
+	if not AZSSpellMeterName["Неустрашимости"] then AZSSpellMeterName["Неустрашимости"] = "Dreadnaught" end
+	if not AZSSpellMeterName["Безстрашності"] then AZSSpellMeterName["Безстрашності"] = "Dreadnaught" end
+	if not AZSSpellMeterName["无畏"] then AZSSpellMeterName["无畏"] = "Dreadnaught" end
+	if not AZSSpellMeterName["ドレッドノート"] then AZSSpellMeterName["ドレッドノート"] = "Dreadnaught" end
+	if not AZSSpellMeterName["드레드노트"] then AZSSpellMeterName["드레드노트"] = "Dreadnaught" end
+	if not AZSSpellMeterName["Giermka"] then AZSSpellMeterName["Giermka"] = "Squire's" end
+	if not AZSSpellMeterName["Panoše"] then AZSSpellMeterName["Panoše"] = "Squire's" end
+	if not AZSSpellMeterName["Knappen"] then AZSSpellMeterName["Knappen"] = "Squire's" end
+	if not AZSSpellMeterName["do Escudeiro"] then AZSSpellMeterName["do Escudeiro"] = "Squire's" end
+	if not AZSSpellMeterName["de escudero"] then AZSSpellMeterName["de escudero"] = "Squire's" end
+	if not AZSSpellMeterName["d'écuyer"] then AZSSpellMeterName["d'écuyer"] = "Squire's" end
+	if not AZSSpellMeterName["Scutierului"] then AZSSpellMeterName["Scutierului"] = "Squire's" end
+	if not AZSSpellMeterName["оруженосца"] then AZSSpellMeterName["оруженосца"] = "Squire's" end
+	if not AZSSpellMeterName["зброєносця"] then AZSSpellMeterName["зброєносця"] = "Squire's" end
+	if not AZSSpellMeterName["侍从"] then AZSSpellMeterName["侍从"] = "Squire's" end
+	if not AZSSpellMeterName["従者"] then AZSSpellMeterName["従者"] = "Squire's" end
+	if not AZSSpellMeterName["종자의"] then AZSSpellMeterName["종자의"] = "Squire's" end
+	if not AZSSpellMeterName["Kuźni Światła"] then AZSSpellMeterName["Kuźni Światła"] = "Lightforge" end
+	if not AZSSpellMeterName["Kovárny Světla"] then AZSSpellMeterName["Kovárny Světla"] = "Lightforge" end
+	if not AZSSpellMeterName["Lichtschmiede"] then AZSSpellMeterName["Lichtschmiede"] = "Lightforge" end
+	if not AZSSpellMeterName["da Forja da Luz"] then AZSSpellMeterName["da Forja da Luz"] = "Lightforge" end
+	if not AZSSpellMeterName["de Forjaluz"] then AZSSpellMeterName["de Forjaluz"] = "Lightforge" end
+	if not AZSSpellMeterName["de Forgelumière"] then AZSSpellMeterName["de Forgelumière"] = "Lightforge" end
+	if not AZSSpellMeterName["Forjei Luminii"] then AZSSpellMeterName["Forjei Luminii"] = "Lightforge" end
+	if not AZSSpellMeterName["Кузни Света"] then AZSSpellMeterName["Кузни Света"] = "Lightforge" end
+	if not AZSSpellMeterName["Кузні Світла"] then AZSSpellMeterName["Кузні Світла"] = "Lightforge" end
+	if not AZSSpellMeterName["光铸"] then AZSSpellMeterName["光铸"] = "Lightforge" end
+	if not AZSSpellMeterName["光の鍛冶場"] then AZSSpellMeterName["光の鍛冶場"] = "Lightforge" end
+	if not AZSSpellMeterName["빛의 대장간"] then AZSSpellMeterName["빛의 대장간"] = "Lightforge" end
+	if not AZSSpellMeterName["Strażnika Prawa"] then AZSSpellMeterName["Strażnika Prawa"] = "Lawbringer" end
+	if not AZSSpellMeterName["Strážce zákona"] then AZSSpellMeterName["Strážce zákona"] = "Lawbringer" end
+	if not AZSSpellMeterName["Gesetzesbringer"] then AZSSpellMeterName["Gesetzesbringer"] = "Lawbringer" end
+	if not AZSSpellMeterName["do Portador da Lei"] then AZSSpellMeterName["do Portador da Lei"] = "Lawbringer" end
+	if not AZSSpellMeterName["del Justiciero"] then AZSSpellMeterName["del Justiciero"] = "Lawbringer" end
+	if not AZSSpellMeterName["du Justicier"] then AZSSpellMeterName["du Justicier"] = "Lawbringer" end
+	if not AZSSpellMeterName["Aducătorului de Lege"] then AZSSpellMeterName["Aducătorului de Lege"] = "Lawbringer" end
+	if not AZSSpellMeterName["Законодателя"] then AZSSpellMeterName["Законодателя"] = "Lawbringer" end
+	if not AZSSpellMeterName["Законотворця"] then AZSSpellMeterName["Законотворця"] = "Lawbringer" end
+	if not AZSSpellMeterName["秩序之源"] then AZSSpellMeterName["秩序之源"] = "Lawbringer" end
+	if not AZSSpellMeterName["法の執行者"] then AZSSpellMeterName["法の執行者"] = "Lawbringer" end
+	if not AZSSpellMeterName["질서의 수호자"] then AZSSpellMeterName["질서의 수호자"] = "Lawbringer" end
+	if not AZSSpellMeterName["Odkupienia"] then AZSSpellMeterName["Odkupienia"] = "Redemption" end
+	if not AZSSpellMeterName["Vykoupení"] then AZSSpellMeterName["Vykoupení"] = "Redemption" end
+	if not AZSSpellMeterName["Erlösung"] then AZSSpellMeterName["Erlösung"] = "Redemption" end
+	if not AZSSpellMeterName["da Redenção"] then AZSSpellMeterName["da Redenção"] = "Redemption" end
+	if not AZSSpellMeterName["de Redención"] then AZSSpellMeterName["de Redención"] = "Redemption" end
+	if not AZSSpellMeterName["de la Rédemption"] then AZSSpellMeterName["de la Rédemption"] = "Redemption" end
+	if not AZSSpellMeterName["Mântuirii"] then AZSSpellMeterName["Mântuirii"] = "Redemption" end
+	if not AZSSpellMeterName["Искупления"] then AZSSpellMeterName["Искупления"] = "Redemption" end
+	if not AZSSpellMeterName["Відкуплення"] then AZSSpellMeterName["Відкуплення"] = "Redemption" end
+	if not AZSSpellMeterName["救赎"] then AZSSpellMeterName["救赎"] = "Redemption" end
+	if not AZSSpellMeterName["贖罪"] then AZSSpellMeterName["贖罪"] = "Redemption" end
+	if not AZSSpellMeterName["구원의"] then AZSSpellMeterName["구원의"] = "Redemption" end
+	if not AZSSpellMeterName["Tropiciela"] then AZSSpellMeterName["Tropiciela"] = "Tracker's" end
+	if not AZSSpellMeterName["Stopaře"] then AZSSpellMeterName["Stopaře"] = "Tracker's" end
+	if not AZSSpellMeterName["Fährtenleser"] then AZSSpellMeterName["Fährtenleser"] = "Tracker's" end
+	if not AZSSpellMeterName["do Rastreador"] then AZSSpellMeterName["do Rastreador"] = "Tracker's" end
+	if not AZSSpellMeterName["de rastreador"] then AZSSpellMeterName["de rastreador"] = "Tracker's" end
+	if not AZSSpellMeterName["de pisteur"] then AZSSpellMeterName["de pisteur"] = "Tracker's" end
+	if not AZSSpellMeterName["Urmăritorului"] then AZSSpellMeterName["Urmăritorului"] = "Tracker's" end
+	if not AZSSpellMeterName["следопыта"] then AZSSpellMeterName["следопыта"] = "Tracker's" end
+	if not AZSSpellMeterName["слідопита"] then AZSSpellMeterName["слідопита"] = "Tracker's" end
+	if not AZSSpellMeterName["追踪者"] then AZSSpellMeterName["追踪者"] = "Tracker's" end
+	if not AZSSpellMeterName["追跡者"] then AZSSpellMeterName["追跡者"] = "Tracker's" end
+	if not AZSSpellMeterName["추적자의"] then AZSSpellMeterName["추적자의"] = "Tracker's" end
+	if not AZSSpellMeterName["Tropiciela Bestii"] then AZSSpellMeterName["Tropiciela Bestii"] = "Beaststalker's" end
+	if not AZSSpellMeterName["Stopaře šelem"] then AZSSpellMeterName["Stopaře šelem"] = "Beaststalker's" end
+	if not AZSSpellMeterName["Wildtierpirscher"] then AZSSpellMeterName["Wildtierpirscher"] = "Beaststalker's" end
+	if not AZSSpellMeterName["do Espreitador de Feras"] then AZSSpellMeterName["do Espreitador de Feras"] = "Beaststalker's" end
+	if not AZSSpellMeterName["de acechabestias"] then AZSSpellMeterName["de acechabestias"] = "Beaststalker's" end
+	if not AZSSpellMeterName["de traqueur de bêtes"] then AZSSpellMeterName["de traqueur de bêtes"] = "Beaststalker's" end
+	if not AZSSpellMeterName["Pânditorului de fiare"] then AZSSpellMeterName["Pânditorului de fiare"] = "Beaststalker's" end
+	if not AZSSpellMeterName["Зверолова"] then AZSSpellMeterName["Зверолова"] = "Beaststalker's" end
+	if not AZSSpellMeterName["Звіролова"] then AZSSpellMeterName["Звіролова"] = "Beaststalker's" end
+	if not AZSSpellMeterName["野兽追猎者"] then AZSSpellMeterName["野兽追猎者"] = "Beaststalker's" end
+	if not AZSSpellMeterName["獣の追跡者"] then AZSSpellMeterName["獣の追跡者"] = "Beaststalker's" end
+	if not AZSSpellMeterName["야수추적자"] then AZSSpellMeterName["야수추적자"] = "Beaststalker's" end
+	if not AZSSpellMeterName["Tropiciela Olbrzymów"] then AZSSpellMeterName["Tropiciela Olbrzymów"] = "Giantstalker's" end
+	if not AZSSpellMeterName["Stopaře obrů"] then AZSSpellMeterName["Stopaře obrů"] = "Giantstalker's" end
+	if not AZSSpellMeterName["Riesenjäger"] then AZSSpellMeterName["Riesenjäger"] = "Giantstalker's" end
+	if not AZSSpellMeterName["do Espreitador de Gigantes"] then AZSSpellMeterName["do Espreitador de Gigantes"] = "Giantstalker's" end
+	if not AZSSpellMeterName["de acechagigantes"] then AZSSpellMeterName["de acechagigantes"] = "Giantstalker's" end
+	if not AZSSpellMeterName["de traqueur de géants"] then AZSSpellMeterName["de traqueur de géants"] = "Giantstalker's" end
+	if not AZSSpellMeterName["Pânditorului de giganți"] then AZSSpellMeterName["Pânditorului de giganți"] = "Giantstalker's" end
+	if not AZSSpellMeterName["Ловца великанов"] then AZSSpellMeterName["Ловца великанов"] = "Giantstalker's" end
+	if not AZSSpellMeterName["Ловця велетнів"] then AZSSpellMeterName["Ловця велетнів"] = "Giantstalker's" end
+	if not AZSSpellMeterName["巨人追猎者"] then AZSSpellMeterName["巨人追猎者"] = "Giantstalker's" end
+	if not AZSSpellMeterName["巨人の追跡者"] then AZSSpellMeterName["巨人の追跡者"] = "Giantstalker's" end
+	if not AZSSpellMeterName["거인추적자"] then AZSSpellMeterName["거인추적자"] = "Giantstalker's" end
+	if not AZSSpellMeterName["Tropiciela Smoków"] then AZSSpellMeterName["Tropiciela Smoków"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["Stopaře draků"] then AZSSpellMeterName["Stopaře draků"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["Drachenjäger"] then AZSSpellMeterName["Drachenjäger"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["do Espreitador de Dragões"] then AZSSpellMeterName["do Espreitador de Dragões"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["de acechadragones"] then AZSSpellMeterName["de acechadragones"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["de traqueur de dragons"] then AZSSpellMeterName["de traqueur de dragons"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["Pânditorului de dragoni"] then AZSSpellMeterName["Pânditorului de dragoni"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["Охотника на драконов"] then AZSSpellMeterName["Охотника на драконов"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["Ловця драконів"] then AZSSpellMeterName["Ловця драконів"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["巨龙追猎者"] then AZSSpellMeterName["巨龙追猎者"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["竜の追跡者"] then AZSSpellMeterName["竜の追跡者"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["용추적자"] then AZSSpellMeterName["용추적자"] = "Dragonstalker's" end
+	if not AZSSpellMeterName["Tropiciela Krypt"] then AZSSpellMeterName["Tropiciela Krypt"] = "Cryptstalker" end
+	if not AZSSpellMeterName["Stopaře krypt"] then AZSSpellMeterName["Stopaře krypt"] = "Cryptstalker" end
+	if not AZSSpellMeterName["Gruftpirscher"] then AZSSpellMeterName["Gruftpirscher"] = "Cryptstalker" end
+	if not AZSSpellMeterName["do Espreitador da Cripta"] then AZSSpellMeterName["do Espreitador da Cripta"] = "Cryptstalker" end
+	if not AZSSpellMeterName["de acechacriptas"] then AZSSpellMeterName["de acechacriptas"] = "Cryptstalker" end
+	if not AZSSpellMeterName["de traqueur des cryptes"] then AZSSpellMeterName["de traqueur des cryptes"] = "Cryptstalker" end
+	if not AZSSpellMeterName["Pânditorului de cripte"] then AZSSpellMeterName["Pânditorului de cripte"] = "Cryptstalker" end
+	if not AZSSpellMeterName["Склепного охотника"] then AZSSpellMeterName["Склепного охотника"] = "Cryptstalker" end
+	if not AZSSpellMeterName["Склепного ловця"] then AZSSpellMeterName["Склепного ловця"] = "Cryptstalker" end
+	if not AZSSpellMeterName["地穴追猎者"] then AZSSpellMeterName["地穴追猎者"] = "Cryptstalker" end
+	if not AZSSpellMeterName["地下墓所の追跡者"] then AZSSpellMeterName["地下墓所の追跡者"] = "Cryptstalker" end
+	if not AZSSpellMeterName["지하추적자"] then AZSSpellMeterName["지하추적자"] = "Cryptstalker" end
+	if not AZSSpellMeterName["Rzezimieszka"] then AZSSpellMeterName["Rzezimieszka"] = "Footpad's" end
+	if not AZSSpellMeterName["Hrdlořeza"] then AZSSpellMeterName["Hrdlořeza"] = "Footpad's" end
+	if not AZSSpellMeterName["Wegelagerer"] then AZSSpellMeterName["Wegelagerer"] = "Footpad's" end
+	if not AZSSpellMeterName["do Gatuno"] then AZSSpellMeterName["do Gatuno"] = "Footpad's" end
+	if not AZSSpellMeterName["de salteador"] then AZSSpellMeterName["de salteador"] = "Footpad's" end
+	if not AZSSpellMeterName["de détrousseur"] then AZSSpellMeterName["de détrousseur"] = "Footpad's" end
+	if not AZSSpellMeterName["Hoinarului"] then AZSSpellMeterName["Hoinarului"] = "Footpad's" end
+	if not AZSSpellMeterName["бродяги"] then AZSSpellMeterName["бродяги"] = "Footpad's" end
+	if not AZSSpellMeterName["拦路贼"] then AZSSpellMeterName["拦路贼"] = "Footpad's" end
+	if not AZSSpellMeterName["追い剥ぎ"] then AZSSpellMeterName["追い剥ぎ"] = "Footpad's" end
+	if not AZSSpellMeterName["노상강도의"] then AZSSpellMeterName["노상강도의"] = "Footpad's" end
+	if not AZSSpellMeterName["Kunsztu Cienia"] then AZSSpellMeterName["Kunsztu Cienia"] = "Shadowcraft" end
+	if not AZSSpellMeterName["Stínového umění"] then AZSSpellMeterName["Stínového umění"] = "Shadowcraft" end
+	if not AZSSpellMeterName["Schattenhandwerk"] then AZSSpellMeterName["Schattenhandwerk"] = "Shadowcraft" end
+	if not AZSSpellMeterName["da Arte das Sombras"] then AZSSpellMeterName["da Arte das Sombras"] = "Shadowcraft" end
+	if not AZSSpellMeterName["de Hechurasombra"] then AZSSpellMeterName["de Hechurasombra"] = "Shadowcraft" end
+	if not AZSSpellMeterName["d'Art de l'ombre"] then AZSSpellMeterName["d'Art de l'ombre"] = "Shadowcraft" end
+	if not AZSSpellMeterName["Meșteșugului umbrelor"] then AZSSpellMeterName["Meșteșugului umbrelor"] = "Shadowcraft" end
+	if not AZSSpellMeterName["Мастера теней"] then AZSSpellMeterName["Мастера теней"] = "Shadowcraft" end
+	if not AZSSpellMeterName["Майстра тіней"] then AZSSpellMeterName["Майстра тіней"] = "Shadowcraft" end
+	if not AZSSpellMeterName["迅影"] then AZSSpellMeterName["迅影"] = "Shadowcraft" end
+	if not AZSSpellMeterName["影の技"] then AZSSpellMeterName["影の技"] = "Shadowcraft" end
+	if not AZSSpellMeterName["어둠의 기술"] then AZSSpellMeterName["어둠의 기술"] = "Shadowcraft" end
+	if not AZSSpellMeterName["Nocnego Zabójcy"] then AZSSpellMeterName["Nocnego Zabójcy"] = "Nightslayer" end
+	if not AZSSpellMeterName["Nočního zabijáka"] then AZSSpellMeterName["Nočního zabijáka"] = "Nightslayer" end
+	if not AZSSpellMeterName["Nachtmeuchler"] then AZSSpellMeterName["Nachtmeuchler"] = "Nightslayer" end
+	if not AZSSpellMeterName["do Matador Noturno"] then AZSSpellMeterName["do Matador Noturno"] = "Nightslayer" end
+	if not AZSSpellMeterName["de Matanoche"] then AZSSpellMeterName["de Matanoche"] = "Nightslayer" end
+	if not AZSSpellMeterName["de Tueur de la nuit"] then AZSSpellMeterName["de Tueur de la nuit"] = "Nightslayer" end
+	if not AZSSpellMeterName["Ucigașului nopții"] then AZSSpellMeterName["Ucigașului nopții"] = "Nightslayer" end
+	if not AZSSpellMeterName["Ночного убийцы"] then AZSSpellMeterName["Ночного убийцы"] = "Nightslayer" end
+	if not AZSSpellMeterName["Нічного вбивці"] then AZSSpellMeterName["Нічного вбивці"] = "Nightslayer" end
+	if not AZSSpellMeterName["夜幕杀手"] then AZSSpellMeterName["夜幕杀手"] = "Nightslayer" end
+	if not AZSSpellMeterName["夜の殺し屋"] then AZSSpellMeterName["夜の殺し屋"] = "Nightslayer" end
+	if not AZSSpellMeterName["밤의 살해자"] then AZSSpellMeterName["밤의 살해자"] = "Nightslayer" end
+	if not AZSSpellMeterName["Krwawego Kła"] then AZSSpellMeterName["Krwawego Kła"] = "Bloodfang" end
+	if not AZSSpellMeterName["Krvavého tesáku"] then AZSSpellMeterName["Krvavého tesáku"] = "Bloodfang" end
+	if not AZSSpellMeterName["Blutfang"] then AZSSpellMeterName["Blutfang"] = "Bloodfang" end
+	if not AZSSpellMeterName["da Presa Sangrenta"] then AZSSpellMeterName["da Presa Sangrenta"] = "Bloodfang" end
+	if not AZSSpellMeterName["de Colmillo de sangre"] then AZSSpellMeterName["de Colmillo de sangre"] = "Bloodfang" end
+	if not AZSSpellMeterName["de Croc-de-sang"] then AZSSpellMeterName["de Croc-de-sang"] = "Bloodfang" end
+	if not AZSSpellMeterName["Colțului însângerat"] then AZSSpellMeterName["Colțului însângerat"] = "Bloodfang" end
+	if not AZSSpellMeterName["Кровавого Клыка"] then AZSSpellMeterName["Кровавого Клыка"] = "Bloodfang" end
+	if not AZSSpellMeterName["Кривавого Ікла"] then AZSSpellMeterName["Кривавого Ікла"] = "Bloodfang" end
+	if not AZSSpellMeterName["血牙"] then AZSSpellMeterName["血牙"] = "Bloodfang" end
+	if not AZSSpellMeterName["ブラッドファング"] then AZSSpellMeterName["ブラッドファング"] = "Bloodfang" end
+	if not AZSSpellMeterName["붉은송곳니"] then AZSSpellMeterName["붉은송곳니"] = "Bloodfang" end
+	if not AZSSpellMeterName["Kościanej Kosy"] then AZSSpellMeterName["Kościanej Kosy"] = "Bonescythe" end
+	if not AZSSpellMeterName["Kostěné kosy"] then AZSSpellMeterName["Kostěné kosy"] = "Bonescythe" end
+	if not AZSSpellMeterName["Knochensense"] then AZSSpellMeterName["Knochensense"] = "Bonescythe" end
+	if not AZSSpellMeterName["da Foice de Ossos"] then AZSSpellMeterName["da Foice de Ossos"] = "Bonescythe" end
+	if not AZSSpellMeterName["de Guadaña ósea"] then AZSSpellMeterName["de Guadaña ósea"] = "Bonescythe" end
+	if not AZSSpellMeterName["de Faucheur d'os"] then AZSSpellMeterName["de Faucheur d'os"] = "Bonescythe" end
+	if not AZSSpellMeterName["Coasei de os"] then AZSSpellMeterName["Coasei de os"] = "Bonescythe" end
+	if not AZSSpellMeterName["Костяной Косы"] then AZSSpellMeterName["Костяной Косы"] = "Bonescythe" end
+	if not AZSSpellMeterName["Кістяної Коси"] then AZSSpellMeterName["Кістяної Коси"] = "Bonescythe" end
+	if not AZSSpellMeterName["骨镰"] then AZSSpellMeterName["骨镰"] = "Bonescythe" end
+	if not AZSSpellMeterName["骨の大鎌"] then AZSSpellMeterName["骨の大鎌"] = "Bonescythe" end
+	if not AZSSpellMeterName["뼈낫"] then AZSSpellMeterName["뼈낫"] = "Bonescythe" end
+	if not AZSSpellMeterName["Akolity"] then AZSSpellMeterName["Akolity"] = "Acolyte's" end
+	if not AZSSpellMeterName["Akolyty"] then AZSSpellMeterName["Akolyty"] = "Acolyte's" end
+	if not AZSSpellMeterName["Akolythen"] then AZSSpellMeterName["Akolythen"] = "Acolyte's" end
+	if not AZSSpellMeterName["do Acólito"] then AZSSpellMeterName["do Acólito"] = "Acolyte's" end
+	if not AZSSpellMeterName["de acólito"] then AZSSpellMeterName["de acólito"] = "Acolyte's" end
+	if not AZSSpellMeterName["d'acolyte"] then AZSSpellMeterName["d'acolyte"] = "Acolyte's" end
+	if not AZSSpellMeterName["Acolitului"] then AZSSpellMeterName["Acolitului"] = "Acolyte's" end
+	if not AZSSpellMeterName["послушника"] then AZSSpellMeterName["послушника"] = "Acolyte's" end
+	if not AZSSpellMeterName["侍僧"] then AZSSpellMeterName["侍僧"] = "Acolyte's" end
+	if not AZSSpellMeterName["侍祭"] then AZSSpellMeterName["侍祭"] = "Acolyte's" end
+	if not AZSSpellMeterName["수행사제의"] then AZSSpellMeterName["수행사제의"] = "Acolyte's" end
+	if not AZSSpellMeterName["Pobożności"] then AZSSpellMeterName["Pobożności"] = "Devout" end
+	if not AZSSpellMeterName["Zbožnosti"] then AZSSpellMeterName["Zbožnosti"] = "Devout" end
+	if not AZSSpellMeterName["Andachts"] then AZSSpellMeterName["Andachts"] = "Devout" end
+	if not AZSSpellMeterName["do Devoto"] then AZSSpellMeterName["do Devoto"] = "Devout" end
+	if not AZSSpellMeterName["de devoto"] then AZSSpellMeterName["de devoto"] = "Devout" end
+	if not AZSSpellMeterName["de dévot"] then AZSSpellMeterName["de dévot"] = "Devout" end
+	if not AZSSpellMeterName["Evlaviei"] then AZSSpellMeterName["Evlaviei"] = "Devout" end
+	if not AZSSpellMeterName["Благочестия"] then AZSSpellMeterName["Благочестия"] = "Devout" end
+	if not AZSSpellMeterName["Благочестя"] then AZSSpellMeterName["Благочестя"] = "Devout" end
+	if not AZSSpellMeterName["虔诚"] then AZSSpellMeterName["虔诚"] = "Devout" end
+	if not AZSSpellMeterName["敬虔"] then AZSSpellMeterName["敬虔"] = "Devout" end
+	if not AZSSpellMeterName["독실한"] then AZSSpellMeterName["독실한"] = "Devout" end
+	if not AZSSpellMeterName["Proroctwa"] then AZSSpellMeterName["Proroctwa"] = "Prophecy" end
+	if not AZSSpellMeterName["Proroctví"] then AZSSpellMeterName["Proroctví"] = "Prophecy" end
+	if not AZSSpellMeterName["der Prophezeiung"] then AZSSpellMeterName["der Prophezeiung"] = "Prophecy" end
+	if not AZSSpellMeterName["da Profecia"] then AZSSpellMeterName["da Profecia"] = "Prophecy" end
+	if not AZSSpellMeterName["de Profecía"] then AZSSpellMeterName["de Profecía"] = "Prophecy" end
+	if not AZSSpellMeterName["de prophétie"] then AZSSpellMeterName["de prophétie"] = "Prophecy" end
+	if not AZSSpellMeterName["Profeției"] then AZSSpellMeterName["Profeției"] = "Prophecy" end
+	if not AZSSpellMeterName["Пророчества"] then AZSSpellMeterName["Пророчества"] = "Prophecy" end
+	if not AZSSpellMeterName["Пророцтва"] then AZSSpellMeterName["Пророцтва"] = "Prophecy" end
+	if not AZSSpellMeterName["预言"] then AZSSpellMeterName["预言"] = "Prophecy" end
+	if not AZSSpellMeterName["予言"] then AZSSpellMeterName["予言"] = "Prophecy" end
+	if not AZSSpellMeterName["예언의"] then AZSSpellMeterName["예언의"] = "Prophecy" end
+	if not AZSSpellMeterName["Transcendencji"] then AZSSpellMeterName["Transcendencji"] = "Transcendence" end
+	if not AZSSpellMeterName["der Erhabenheit"] then AZSSpellMeterName["der Erhabenheit"] = "Transcendence" end
+	if not AZSSpellMeterName["da Transcendência"] then AZSSpellMeterName["da Transcendência"] = "Transcendence" end
+	if not AZSSpellMeterName["de Trascendencia"] then AZSSpellMeterName["de Trascendencia"] = "Transcendence" end
+	if not AZSSpellMeterName["de transcendance"] then AZSSpellMeterName["de transcendance"] = "Transcendence" end
+	if not AZSSpellMeterName["Transcendenței"] then AZSSpellMeterName["Transcendenței"] = "Transcendence" end
+	if not AZSSpellMeterName["Превосходства"] then AZSSpellMeterName["Превосходства"] = "Transcendence" end
+	if not AZSSpellMeterName["Трансцендентності"] then AZSSpellMeterName["Трансцендентності"] = "Transcendence" end
+	if not AZSSpellMeterName["卓越"] then AZSSpellMeterName["卓越"] = "Transcendence" end
+	if not AZSSpellMeterName["超越"] then AZSSpellMeterName["超越"] = "Transcendence" end
+	if not AZSSpellMeterName["초월의"] then AZSSpellMeterName["초월의"] = "Transcendence" end
+	if not AZSSpellMeterName["Wiary"] then AZSSpellMeterName["Wiary"] = "Faith" end
+	if not AZSSpellMeterName["Víry"] then AZSSpellMeterName["Víry"] = "Faith" end
+	if not AZSSpellMeterName["des Glaubens"] then AZSSpellMeterName["des Glaubens"] = "Faith" end
+	if not AZSSpellMeterName["da Fé"] then AZSSpellMeterName["da Fé"] = "Faith" end
+	if not AZSSpellMeterName["de Fe"] then AZSSpellMeterName["de Fe"] = "Faith" end
+	if not AZSSpellMeterName["de la foi"] then AZSSpellMeterName["de la foi"] = "Faith" end
+	if not AZSSpellMeterName["Credinței"] then AZSSpellMeterName["Credinței"] = "Faith" end
+	if not AZSSpellMeterName["Веры"] then AZSSpellMeterName["Веры"] = "Faith" end
+	if not AZSSpellMeterName["Віри"] then AZSSpellMeterName["Віри"] = "Faith" end
+	if not AZSSpellMeterName["信仰"] then AZSSpellMeterName["信仰"] = "Faith" end
+	if not AZSSpellMeterName["신앙의"] then AZSSpellMeterName["신앙의"] = "Faith" end
+	if not AZSSpellMeterName["Pierwotnej Mocy"] then AZSSpellMeterName["Pierwotnej Mocy"] = "Primal" end
+	if not AZSSpellMeterName["Prvotní moci"] then AZSSpellMeterName["Prvotní moci"] = "Primal" end
+	if not AZSSpellMeterName["Urzeit"] then AZSSpellMeterName["Urzeit"] = "Primal" end
+	if not AZSSpellMeterName["Primitivo"] then AZSSpellMeterName["Primitivo"] = "Primal" end
+	if not AZSSpellMeterName["primigenio"] then AZSSpellMeterName["primigenio"] = "Primal" end
+	if not AZSSpellMeterName["des origines"] then AZSSpellMeterName["des origines"] = "Primal" end
+	if not AZSSpellMeterName["Primordial"] then AZSSpellMeterName["Primordial"] = "Primal" end
+	if not AZSSpellMeterName["Первородной силы"] then AZSSpellMeterName["Первородной силы"] = "Primal" end
+	if not AZSSpellMeterName["Первісної сили"] then AZSSpellMeterName["Первісної сили"] = "Primal" end
+	if not AZSSpellMeterName["原始"] then AZSSpellMeterName["原始"] = "Primal" end
+	if not AZSSpellMeterName["원시의"] then AZSSpellMeterName["원시의"] = "Primal" end
+	if not AZSSpellMeterName["Żywiołów"] then AZSSpellMeterName["Żywiołów"] = "Elements" end
+	if not AZSSpellMeterName["Živlů"] then AZSSpellMeterName["Živlů"] = "Elements" end
+	if not AZSSpellMeterName["der Elemente"] then AZSSpellMeterName["der Elemente"] = "Elements" end
+	if not AZSSpellMeterName["dos Elementos"] then AZSSpellMeterName["dos Elementos"] = "Elements" end
+	if not AZSSpellMeterName["de los Elementos"] then AZSSpellMeterName["de los Elementos"] = "Elements" end
+	if not AZSSpellMeterName["des éléments"] then AZSSpellMeterName["des éléments"] = "Elements" end
+	if not AZSSpellMeterName["Elementelor"] then AZSSpellMeterName["Elementelor"] = "Elements" end
+	if not AZSSpellMeterName["Стихий"] then AZSSpellMeterName["Стихий"] = "Elements" end
+	if not AZSSpellMeterName["Стихій"] then AZSSpellMeterName["Стихій"] = "Elements" end
+	if not AZSSpellMeterName["元素"] then AZSSpellMeterName["元素"] = "Elements" end
+	if not AZSSpellMeterName["エレメント"] then AZSSpellMeterName["エレメント"] = "Elements" end
+	if not AZSSpellMeterName["원소의"] then AZSSpellMeterName["원소의"] = "Elements" end
+	if not AZSSpellMeterName["Furii Ziemi"] then AZSSpellMeterName["Furii Ziemi"] = "Earthfury" end
+	if not AZSSpellMeterName["Zemské zuřivosti"] then AZSSpellMeterName["Zemské zuřivosti"] = "Earthfury" end
+	if not AZSSpellMeterName["Erdenwut"] then AZSSpellMeterName["Erdenwut"] = "Earthfury" end
+	if not AZSSpellMeterName["da Fúria da Terra"] then AZSSpellMeterName["da Fúria da Terra"] = "Earthfury" end
+	if not AZSSpellMeterName["de Furia terrena"] then AZSSpellMeterName["de Furia terrena"] = "Earthfury" end
+	if not AZSSpellMeterName["de la Furie de la terre"] then AZSSpellMeterName["de la Furie de la terre"] = "Earthfury" end
+	if not AZSSpellMeterName["Furiei pământului"] then AZSSpellMeterName["Furiei pământului"] = "Earthfury" end
+	if not AZSSpellMeterName["Ярости Земли"] then AZSSpellMeterName["Ярости Земли"] = "Earthfury" end
+	if not AZSSpellMeterName["Люті Землі"] then AZSSpellMeterName["Люті Землі"] = "Earthfury" end
+	if not AZSSpellMeterName["大地之怒"] then AZSSpellMeterName["大地之怒"] = "Earthfury" end
+	if not AZSSpellMeterName["大地の怒り"] then AZSSpellMeterName["大地の怒り"] = "Earthfury" end
+	if not AZSSpellMeterName["대지의 격노"] then AZSSpellMeterName["대지의 격노"] = "Earthfury" end
+	if not AZSSpellMeterName["Dziesięciu Burz"] then AZSSpellMeterName["Dziesięciu Burz"] = "Ten Storms" end
+	if not AZSSpellMeterName["Deseti bouří"] then AZSSpellMeterName["Deseti bouří"] = "Ten Storms" end
+	if not AZSSpellMeterName["der zehn Stürme"] then AZSSpellMeterName["der zehn Stürme"] = "Ten Storms" end
+	if not AZSSpellMeterName["das Dez Tempestades"] then AZSSpellMeterName["das Dez Tempestades"] = "Ten Storms" end
+	if not AZSSpellMeterName["de las Diez Tormentas"] then AZSSpellMeterName["de las Diez Tormentas"] = "Ten Storms" end
+	if not AZSSpellMeterName["des Dix tempêtes"] then AZSSpellMeterName["des Dix tempêtes"] = "Ten Storms" end
+	if not AZSSpellMeterName["Celor zece furtuni"] then AZSSpellMeterName["Celor zece furtuni"] = "Ten Storms" end
+	if not AZSSpellMeterName["Десяти Бурь"] then AZSSpellMeterName["Десяти Бурь"] = "Ten Storms" end
+	if not AZSSpellMeterName["Десяти Бур"] then AZSSpellMeterName["Десяти Бур"] = "Ten Storms" end
+	if not AZSSpellMeterName["无尽风暴"] then AZSSpellMeterName["无尽风暴"] = "Ten Storms" end
+	if not AZSSpellMeterName["十の嵐"] then AZSSpellMeterName["十の嵐"] = "Ten Storms" end
+	if not AZSSpellMeterName["열폭풍"] then AZSSpellMeterName["열폭풍"] = "Ten Storms" end
+	if not AZSSpellMeterName["Kruszyciela Ziemi"] then AZSSpellMeterName["Kruszyciela Ziemi"] = "Earthshatter" end
+	if not AZSSpellMeterName["Drtiče země"] then AZSSpellMeterName["Drtiče země"] = "Earthshatter" end
+	if not AZSSpellMeterName["Erdbrecher"] then AZSSpellMeterName["Erdbrecher"] = "Earthshatter" end
+	if not AZSSpellMeterName["do Despedaçador da Terra"] then AZSSpellMeterName["do Despedaçador da Terra"] = "Earthshatter" end
+	if not AZSSpellMeterName["de Rompetierra"] then AZSSpellMeterName["de Rompetierra"] = "Earthshatter" end
+	if not AZSSpellMeterName["de Brise-terre"] then AZSSpellMeterName["de Brise-terre"] = "Earthshatter" end
+	if not AZSSpellMeterName["Spărgătorului de pământ"] then AZSSpellMeterName["Spărgătorului de pământ"] = "Earthshatter" end
+	if not AZSSpellMeterName["Раскола Земли"] then AZSSpellMeterName["Раскола Земли"] = "Earthshatter" end
+	if not AZSSpellMeterName["Розколу Землі"] then AZSSpellMeterName["Розколу Землі"] = "Earthshatter" end
+	if not AZSSpellMeterName["碎地者"] then AZSSpellMeterName["碎地者"] = "Earthshatter" end
+	if not AZSSpellMeterName["大地を砕く者"] then AZSSpellMeterName["大地を砕く者"] = "Earthshatter" end
+	if not AZSSpellMeterName["대지파괴자"] then AZSSpellMeterName["대지파괴자"] = "Earthshatter" end
+	if not AZSSpellMeterName["Ucznia"] then AZSSpellMeterName["Ucznia"] = "Apprentice's" end
+	if not AZSSpellMeterName["Učně"] then AZSSpellMeterName["Učně"] = "Apprentice's" end
+	if not AZSSpellMeterName["Lehrlings"] then AZSSpellMeterName["Lehrlings"] = "Apprentice's" end
+	if not AZSSpellMeterName["do Aprendiz"] then AZSSpellMeterName["do Aprendiz"] = "Apprentice's" end
+	if not AZSSpellMeterName["de aprendiz"] then AZSSpellMeterName["de aprendiz"] = "Apprentice's" end
+	if not AZSSpellMeterName["d'apprenti"] then AZSSpellMeterName["d'apprenti"] = "Apprentice's" end
+	if not AZSSpellMeterName["Ucenicului"] then AZSSpellMeterName["Ucenicului"] = "Apprentice's" end
+	if not AZSSpellMeterName["ученика"] then AZSSpellMeterName["ученика"] = "Apprentice's" end
+	if not AZSSpellMeterName["учня"] then AZSSpellMeterName["учня"] = "Apprentice's" end
+	if not AZSSpellMeterName["学徒"] then AZSSpellMeterName["学徒"] = "Apprentice's" end
+	if not AZSSpellMeterName["見習い"] then AZSSpellMeterName["見習い"] = "Apprentice's" end
+	if not AZSSpellMeterName["수습생의"] then AZSSpellMeterName["수습생의"] = "Apprentice's" end
+	if not AZSSpellMeterName["Magistra"] then AZSSpellMeterName["Magistra"] = "Magister's" end
+	if not AZSSpellMeterName["Magister"] then AZSSpellMeterName["Magister"] = "Magister's" end
+	if not AZSSpellMeterName["do Magíster"] then AZSSpellMeterName["do Magíster"] = "Magister's" end
+	if not AZSSpellMeterName["de magister"] then AZSSpellMeterName["de magister"] = "Magister's" end
+	if not AZSSpellMeterName["de magistère"] then AZSSpellMeterName["de magistère"] = "Magister's" end
+	if not AZSSpellMeterName["Magistrului"] then AZSSpellMeterName["Magistrului"] = "Magister's" end
+	if not AZSSpellMeterName["Магистра"] then AZSSpellMeterName["Магистра"] = "Magister's" end
+	if not AZSSpellMeterName["Магістра"] then AZSSpellMeterName["Магістра"] = "Magister's" end
+	if not AZSSpellMeterName["博学者"] then AZSSpellMeterName["博学者"] = "Magister's" end
+	if not AZSSpellMeterName["マジスター"] then AZSSpellMeterName["マジスター"] = "Magister's" end
+	if not AZSSpellMeterName["마법학자의"] then AZSSpellMeterName["마법학자의"] = "Magister's" end
+	if not AZSSpellMeterName["Arkanisty"] then AZSSpellMeterName["Arkanisty"] = "Arcanist" end
+	if not AZSSpellMeterName["Arkanisten"] then AZSSpellMeterName["Arkanisten"] = "Arcanist" end
+	if not AZSSpellMeterName["do Arcanista"] then AZSSpellMeterName["do Arcanista"] = "Arcanist" end
+	if not AZSSpellMeterName["de Arcanista"] then AZSSpellMeterName["de Arcanista"] = "Arcanist" end
+	if not AZSSpellMeterName["d'arcaniste"] then AZSSpellMeterName["d'arcaniste"] = "Arcanist" end
+	if not AZSSpellMeterName["Arcanistului"] then AZSSpellMeterName["Arcanistului"] = "Arcanist" end
+	if not AZSSpellMeterName["Чародея"] then AZSSpellMeterName["Чародея"] = "Arcanist" end
+	if not AZSSpellMeterName["Чародія"] then AZSSpellMeterName["Чародія"] = "Arcanist" end
+	if not AZSSpellMeterName["奥术师"] then AZSSpellMeterName["奥术师"] = "Arcanist" end
+	if not AZSSpellMeterName["秘術師"] then AZSSpellMeterName["秘術師"] = "Arcanist" end
+	if not AZSSpellMeterName["신비술사"] then AZSSpellMeterName["신비술사"] = "Arcanist" end
+	if not AZSSpellMeterName["Wiatru Otchłani"] then AZSSpellMeterName["Wiatru Otchłani"] = "Netherwind" end
+	if not AZSSpellMeterName["Větru prázdnoty"] then AZSSpellMeterName["Větru prázdnoty"] = "Netherwind" end
+	if not AZSSpellMeterName["Ventonéter"] then AZSSpellMeterName["Ventonéter"] = "Netherwind" end
+	if not AZSSpellMeterName["de Viento abisal"] then AZSSpellMeterName["de Viento abisal"] = "Netherwind" end
+	if not AZSSpellMeterName["de Vent-du-Néant"] then AZSSpellMeterName["de Vent-du-Néant"] = "Netherwind" end
+	if not AZSSpellMeterName["Vântului hăului"] then AZSSpellMeterName["Vântului hăului"] = "Netherwind" end
+	if not AZSSpellMeterName["Ветра Пустоты"] then AZSSpellMeterName["Ветра Пустоты"] = "Netherwind" end
+	if not AZSSpellMeterName["Вітру Порожнечі"] then AZSSpellMeterName["Вітру Порожнечі"] = "Netherwind" end
+	if not AZSSpellMeterName["灵风"] then AZSSpellMeterName["灵风"] = "Netherwind" end
+	if not AZSSpellMeterName["ネザーウィンド"] then AZSSpellMeterName["ネザーウィンド"] = "Netherwind" end
+	if not AZSSpellMeterName["황천바람"] then AZSSpellMeterName["황천바람"] = "Netherwind" end
+	if not AZSSpellMeterName["Mroźnego Ognia"] then AZSSpellMeterName["Mroźnego Ognia"] = "Frostfire" end
+	if not AZSSpellMeterName["Mrazivého ohně"] then AZSSpellMeterName["Mrazivého ohně"] = "Frostfire" end
+	if not AZSSpellMeterName["Frostfeuer"] then AZSSpellMeterName["Frostfeuer"] = "Frostfire" end
+	if not AZSSpellMeterName["do Fogogelo"] then AZSSpellMeterName["do Fogogelo"] = "Frostfire" end
+	if not AZSSpellMeterName["de Fuego de Escarcha"] then AZSSpellMeterName["de Fuego de Escarcha"] = "Frostfire" end
+	if not AZSSpellMeterName["de Givrefeu"] then AZSSpellMeterName["de Givrefeu"] = "Frostfire" end
+	if not AZSSpellMeterName["Focului înghețat"] then AZSSpellMeterName["Focului înghețat"] = "Frostfire" end
+	if not AZSSpellMeterName["Ледяного Огня"] then AZSSpellMeterName["Ледяного Огня"] = "Frostfire" end
+	if not AZSSpellMeterName["Крижаного Вогню"] then AZSSpellMeterName["Крижаного Вогню"] = "Frostfire" end
+	if not AZSSpellMeterName["霜火"] then AZSSpellMeterName["霜火"] = "Frostfire" end
+	if not AZSSpellMeterName["フロストファイア"] then AZSSpellMeterName["フロストファイア"] = "Frostfire" end
+	if not AZSSpellMeterName["서리불꽃"] then AZSSpellMeterName["서리불꽃"] = "Frostfire" end
+	if not AZSSpellMeterName["Nowicjusza"] then AZSSpellMeterName["Nowicjusza"] = "Novice's" end
+	if not AZSSpellMeterName["Nováčka"] then AZSSpellMeterName["Nováčka"] = "Novice's" end
+	if not AZSSpellMeterName["Novizen"] then AZSSpellMeterName["Novizen"] = "Novice's" end
+	if not AZSSpellMeterName["do Novato"] then AZSSpellMeterName["do Novato"] = "Novice's" end
+	if not AZSSpellMeterName["de novicio"] then AZSSpellMeterName["de novicio"] = "Novice's" end
+	if not AZSSpellMeterName["de novice"] then AZSSpellMeterName["de novice"] = "Novice's" end
+	if not AZSSpellMeterName["Novicelui"] then AZSSpellMeterName["Novicelui"] = "Novice's" end
+	if not AZSSpellMeterName["новичка"] then AZSSpellMeterName["новичка"] = "Novice's" end
+	if not AZSSpellMeterName["новачка"] then AZSSpellMeterName["новачка"] = "Novice's" end
+	if not AZSSpellMeterName["新手"] then AZSSpellMeterName["新手"] = "Novice's" end
+	if not AZSSpellMeterName["初心者"] then AZSSpellMeterName["初心者"] = "Novice's" end
+	if not AZSSpellMeterName["초보자의"] then AZSSpellMeterName["초보자의"] = "Novice's" end
+	if not AZSSpellMeterName["Mgły Grozy"] then AZSSpellMeterName["Mgły Grozy"] = "Dreadmist" end
+	if not AZSSpellMeterName["Mlhy hrůzy"] then AZSSpellMeterName["Mlhy hrůzy"] = "Dreadmist" end
+	if not AZSSpellMeterName["Schreckensnebel"] then AZSSpellMeterName["Schreckensnebel"] = "Dreadmist" end
+	if not AZSSpellMeterName["da Névoa Temível"] then AZSSpellMeterName["da Névoa Temível"] = "Dreadmist" end
+	if not AZSSpellMeterName["de Bruma terrible"] then AZSSpellMeterName["de Bruma terrible"] = "Dreadmist" end
+	if not AZSSpellMeterName["de Brume-funeste"] then AZSSpellMeterName["de Brume-funeste"] = "Dreadmist" end
+	if not AZSSpellMeterName["Negurii groazei"] then AZSSpellMeterName["Negurii groazei"] = "Dreadmist" end
+	if not AZSSpellMeterName["Жуткой Мглы"] then AZSSpellMeterName["Жуткой Мглы"] = "Dreadmist" end
+	if not AZSSpellMeterName["Моторошної Імли"] then AZSSpellMeterName["Моторошної Імли"] = "Dreadmist" end
+	if not AZSSpellMeterName["恐怖之雾"] then AZSSpellMeterName["恐怖之雾"] = "Dreadmist" end
+	if not AZSSpellMeterName["恐怖の霧"] then AZSSpellMeterName["恐怖の霧"] = "Dreadmist" end
+	if not AZSSpellMeterName["공포의 안개"] then AZSSpellMeterName["공포의 안개"] = "Dreadmist" end
+	if not AZSSpellMeterName["Spaczonego Serca"] then AZSSpellMeterName["Spaczonego Serca"] = "Felheart" end
+	if not AZSSpellMeterName["Zkaženého srdce"] then AZSSpellMeterName["Zkaženého srdce"] = "Felheart" end
+	if not AZSSpellMeterName["Teufelsherz"] then AZSSpellMeterName["Teufelsherz"] = "Felheart" end
+	if not AZSSpellMeterName["do Coração Vil"] then AZSSpellMeterName["do Coração Vil"] = "Felheart" end
+	if not AZSSpellMeterName["de Corazón vil"] then AZSSpellMeterName["de Corazón vil"] = "Felheart" end
+	if not AZSSpellMeterName["de Gangrecœur"] then AZSSpellMeterName["de Gangrecœur"] = "Felheart" end
+	if not AZSSpellMeterName["Inimii fel"] then AZSSpellMeterName["Inimii fel"] = "Felheart" end
+	if not AZSSpellMeterName["Сердца Скверны"] then AZSSpellMeterName["Сердца Скверны"] = "Felheart" end
+	if not AZSSpellMeterName["Серця Скверни"] then AZSSpellMeterName["Серця Скверни"] = "Felheart" end
+	if not AZSSpellMeterName["恶魔之心"] then AZSSpellMeterName["恶魔之心"] = "Felheart" end
+	if not AZSSpellMeterName["フェルハート"] then AZSSpellMeterName["フェルハート"] = "Felheart" end
+	if not AZSSpellMeterName["지옥의 심장"] then AZSSpellMeterName["지옥의 심장"] = "Felheart" end
+	if not AZSSpellMeterName["Nemezis"] then AZSSpellMeterName["Nemezis"] = "Nemesis" end
+	if not AZSSpellMeterName["da Nêmesis"] then AZSSpellMeterName["da Nêmesis"] = "Nemesis" end
+	if not AZSSpellMeterName["de Némesis"] then AZSSpellMeterName["de Némesis"] = "Nemesis" end
+	if not AZSSpellMeterName["de Némésis"] then AZSSpellMeterName["de Némésis"] = "Nemesis" end
+	if not AZSSpellMeterName["Немезиды"] then AZSSpellMeterName["Немезиды"] = "Nemesis" end
+	if not AZSSpellMeterName["Немезиди"] then AZSSpellMeterName["Немезиди"] = "Nemesis" end
+	if not AZSSpellMeterName["复仇"] then AZSSpellMeterName["复仇"] = "Nemesis" end
+	if not AZSSpellMeterName["ネメシス"] then AZSSpellMeterName["ネメシス"] = "Nemesis" end
+	if not AZSSpellMeterName["천벌"] then AZSSpellMeterName["천벌"] = "Nemesis" end
+	if not AZSSpellMeterName["Serca Zarazy"] then AZSSpellMeterName["Serca Zarazy"] = "Plagueheart" end
+	if not AZSSpellMeterName["Srdce moru"] then AZSSpellMeterName["Srdce moru"] = "Plagueheart" end
+	if not AZSSpellMeterName["Seuchenherz"] then AZSSpellMeterName["Seuchenherz"] = "Plagueheart" end
+	if not AZSSpellMeterName["do Coração da Peste"] then AZSSpellMeterName["do Coração da Peste"] = "Plagueheart" end
+	if not AZSSpellMeterName["de Corazón de peste"] then AZSSpellMeterName["de Corazón de peste"] = "Plagueheart" end
+	if not AZSSpellMeterName["de Cœur-de-peste"] then AZSSpellMeterName["de Cœur-de-peste"] = "Plagueheart" end
+	if not AZSSpellMeterName["Inimii ciumei"] then AZSSpellMeterName["Inimii ciumei"] = "Plagueheart" end
+	if not AZSSpellMeterName["Чумного Сердца"] then AZSSpellMeterName["Чумного Сердца"] = "Plagueheart" end
+	if not AZSSpellMeterName["Чумного Серця"] then AZSSpellMeterName["Чумного Серця"] = "Plagueheart" end
+	if not AZSSpellMeterName["瘟疫之心"] then AZSSpellMeterName["瘟疫之心"] = "Plagueheart" end
+	if not AZSSpellMeterName["疫病の心臓"] then AZSSpellMeterName["疫病の心臓"] = "Plagueheart" end
+	if not AZSSpellMeterName["역병의 심장"] then AZSSpellMeterName["역병의 심장"] = "Plagueheart" end
+	if not AZSSpellMeterName["Gąszczu"] then AZSSpellMeterName["Gąszczu"] = "Thicket" end
+	if not AZSSpellMeterName["Houštiny"] then AZSSpellMeterName["Houštiny"] = "Thicket" end
+	if not AZSSpellMeterName["Dickicht"] then AZSSpellMeterName["Dickicht"] = "Thicket" end
+	if not AZSSpellMeterName["do Matagal"] then AZSSpellMeterName["do Matagal"] = "Thicket" end
+	if not AZSSpellMeterName["de matorral"] then AZSSpellMeterName["de matorral"] = "Thicket" end
+	if not AZSSpellMeterName["des fourrés"] then AZSSpellMeterName["des fourrés"] = "Thicket" end
+	if not AZSSpellMeterName["Desișului"] then AZSSpellMeterName["Desișului"] = "Thicket" end
+	if not AZSSpellMeterName["Чащи"] then AZSSpellMeterName["Чащи"] = "Thicket" end
+	if not AZSSpellMeterName["Хащі"] then AZSSpellMeterName["Хащі"] = "Thicket" end
+	if not AZSSpellMeterName["灌木"] then AZSSpellMeterName["灌木"] = "Thicket" end
+	if not AZSSpellMeterName["茂み"] then AZSSpellMeterName["茂み"] = "Thicket" end
+	if not AZSSpellMeterName["덤불"] then AZSSpellMeterName["덤불"] = "Thicket" end
+	if not AZSSpellMeterName["Dzikiego Serca"] then AZSSpellMeterName["Dzikiego Serca"] = "Wildheart" end
+	if not AZSSpellMeterName["Divokého srdce"] then AZSSpellMeterName["Divokého srdce"] = "Wildheart" end
+	if not AZSSpellMeterName["Wildherz"] then AZSSpellMeterName["Wildherz"] = "Wildheart" end
+	if not AZSSpellMeterName["do Coração Selvagem"] then AZSSpellMeterName["do Coração Selvagem"] = "Wildheart" end
+	if not AZSSpellMeterName["de Corazón salvaje"] then AZSSpellMeterName["de Corazón salvaje"] = "Wildheart" end
+	if not AZSSpellMeterName["de Cœur-sauvage"] then AZSSpellMeterName["de Cœur-sauvage"] = "Wildheart" end
+	if not AZSSpellMeterName["Inimii sălbatice"] then AZSSpellMeterName["Inimii sălbatice"] = "Wildheart" end
+	if not AZSSpellMeterName["Дикого Сердца"] then AZSSpellMeterName["Дикого Сердца"] = "Wildheart" end
+	if not AZSSpellMeterName["Дикого Серця"] then AZSSpellMeterName["Дикого Серця"] = "Wildheart" end
+	if not AZSSpellMeterName["野性之心"] then AZSSpellMeterName["野性之心"] = "Wildheart" end
+	if not AZSSpellMeterName["野生の心"] then AZSSpellMeterName["野生の心"] = "Wildheart" end
+	if not AZSSpellMeterName["야생의 심장"] then AZSSpellMeterName["야생의 심장"] = "Wildheart" end
+	if not AZSSpellMeterName["Cenariusa"] then AZSSpellMeterName["Cenariusa"] = "Cenarion" end
+	if not AZSSpellMeterName["Cenariův"] then AZSSpellMeterName["Cenariův"] = "Cenarion" end
+	if not AZSSpellMeterName["Cenarius"] then AZSSpellMeterName["Cenarius"] = "Cenarion" end
+	if not AZSSpellMeterName["Cenariano"] then AZSSpellMeterName["Cenariano"] = "Cenarion" end
+	if not AZSSpellMeterName["de Cénarius"] then AZSSpellMeterName["de Cénarius"] = "Cenarion" end
+	if not AZSSpellMeterName["Кенария"] then AZSSpellMeterName["Кенария"] = "Cenarion" end
+	if not AZSSpellMeterName["Кенарія"] then AZSSpellMeterName["Кенарія"] = "Cenarion" end
+	if not AZSSpellMeterName["塞纳里奥"] then AZSSpellMeterName["塞纳里奥"] = "Cenarion" end
+	if not AZSSpellMeterName["セナリオン"] then AZSSpellMeterName["セナリオン"] = "Cenarion" end
+	if not AZSSpellMeterName["세나리온"] then AZSSpellMeterName["세나리온"] = "Cenarion" end
+	if not AZSSpellMeterName["Gniewu Burzy"] then AZSSpellMeterName["Gniewu Burzy"] = "Stormrage" end
+	if not AZSSpellMeterName["Bouřného hněvu"] then AZSSpellMeterName["Bouřného hněvu"] = "Stormrage" end
+	if not AZSSpellMeterName["Sturmgrimm"] then AZSSpellMeterName["Sturmgrimm"] = "Stormrage" end
+	if not AZSSpellMeterName["de Tempesfúria"] then AZSSpellMeterName["de Tempesfúria"] = "Stormrage" end
+	if not AZSSpellMeterName["de Tempestira"] then AZSSpellMeterName["de Tempestira"] = "Stormrage" end
+	if not AZSSpellMeterName["de Hurlorage"] then AZSSpellMeterName["de Hurlorage"] = "Stormrage" end
+	if not AZSSpellMeterName["Ярости Бури"] then AZSSpellMeterName["Ярости Бури"] = "Stormrage" end
+	if not AZSSpellMeterName["Люті Бурі"] then AZSSpellMeterName["Люті Бурі"] = "Stormrage" end
+	if not AZSSpellMeterName["怒风"] then AZSSpellMeterName["怒风"] = "Stormrage" end
+	if not AZSSpellMeterName["ストームレイジ"] then AZSSpellMeterName["ストームレイジ"] = "Stormrage" end
+	if not AZSSpellMeterName["폭풍우"] then AZSSpellMeterName["폭풍우"] = "Stormrage" end
+	if not AZSSpellMeterName["Wędrowca Snów"] then AZSSpellMeterName["Wędrowca Snów"] = "Dreamwalker" end
+	if not AZSSpellMeterName["Poutníka snů"] then AZSSpellMeterName["Poutníka snů"] = "Dreamwalker" end
+	if not AZSSpellMeterName["Traumwandler"] then AZSSpellMeterName["Traumwandler"] = "Dreamwalker" end
+	if not AZSSpellMeterName["do Andarilho do Sonho"] then AZSSpellMeterName["do Andarilho do Sonho"] = "Dreamwalker" end
+	if not AZSSpellMeterName["de Caminasueños"] then AZSSpellMeterName["de Caminasueños"] = "Dreamwalker" end
+	if not AZSSpellMeterName["de Marche-rêve"] then AZSSpellMeterName["de Marche-rêve"] = "Dreamwalker" end
+	if not AZSSpellMeterName["Umblătorului prin vis"] then AZSSpellMeterName["Umblătorului prin vis"] = "Dreamwalker" end
+	if not AZSSpellMeterName["Сновидца"] then AZSSpellMeterName["Сновидца"] = "Dreamwalker" end
+	if not AZSSpellMeterName["Сновиди"] then AZSSpellMeterName["Сновиди"] = "Dreamwalker" end
+	if not AZSSpellMeterName["梦游者"] then AZSSpellMeterName["梦游者"] = "Dreamwalker" end
+	if not AZSSpellMeterName["夢歩き"] then AZSSpellMeterName["夢歩き"] = "Dreamwalker" end
+	if not AZSSpellMeterName["꿈결방랑자"] then AZSSpellMeterName["꿈결방랑자"] = "Dreamwalker" end
+end
 
 -- AZS often logs minion hits as "Your Fireball" (player wording) while the
 -- meter puts that damage on Imp / Infernal / …. Map those spell names so hits
@@ -1318,6 +1896,7 @@ local EXTRA_ICONS = {
 	["Leech"] = "Spell_Shadow_LifeDrain",
 	["Onyxia Tooth Pendant"] = "INV_Jewelry_Necklace_09",
 	["Choker of the Fire Lord"] = "INV_Jewelry_Amulet_05",
+	["Frostfire"] = "INV_Chest_Cloth_43",
 	["Choker of Enlightenment"] = "INV_Jewelry_Necklace_10",
 	["Prestor's Talisman of Connivery"] = "INV_Jewelry_Necklace_17",
 	["Animated Chain Necklace"] = "INV_Jewelry_Necklace_01",
@@ -2870,7 +3449,7 @@ local function rebuild(mode)
 	local procName, row
 	if not (config().look and config().look.flat) then
 	for procName, row in pairs(bucket) do
-		if mode ~= "party" and (row.proc or PROC_CAST[englishSpell(procName)] or string.find(procName, ": ", 1, true)) then
+		if mode ~= "party" and ((PROC_CAST[englishSpell(procName)] and not PROC_CAST[englishSpell(procName)].onlyProc) or row.proc or string.find(procName, ": ", 1, true)) then
 			local parents = anchorSpells(procName, bucket)
 			if parents and not (table.getn(parents) == 1 and parents[1] == procName) then
 				local mi = table.getn(merges) + 1
@@ -2985,7 +3564,10 @@ local function rebuild(mode)
 	local anyWarlock = false
 	for summonName, summonRow in pairs(bucket) do
 		local summonEn = englishSpell(summonName)
-		if summonKey[summonEn] or summonKey[summonName] then
+		-- Being out is not a contribution. Healing, Boss, and Taken stay empty
+		-- until that summon added to the number this view tracks.
+		local contributed = (summonRow.damage or 0) > 0 or (showsKills(mode) and (summonRow.kills or 0) > 0)
+		if contributed and (summonKey[summonEn] or summonKey[summonName]) then
 			memberCount = memberCount + 1
 			members[memberCount] = summonName
 			if warlockSummon[summonEn] or warlockSummon[summonName] then
@@ -3060,7 +3642,7 @@ local function rebuild(mode)
 		if keep then
 			-- A proc is the spell it casts. Its kills belong to that spell, so a
 			-- separate row has no kill count of its own.
-			if not entry.procs and (entry.proc or PROC_CAST[englishSpell(name)]) then
+			if not entry.procs and (entry.proc or (PROC_CAST[englishSpell(name)] and not PROC_CAST[englishSpell(name)].onlyProc)) then
 				if not entry.cast then
 					entry.cast = castList(name)
 				end
@@ -3466,6 +4048,11 @@ local function refreshWindow(win)
 	fitBrandTitle(win)
 	if win == frame then
 		graphSlot(mode)
+		if isMainGraphOpen() then
+			paintDpsGraph(win, rateHist[mode], true, mode, "main")
+		elseif graphBoxes.main then
+			paintDpsGraph(win, rateHist[mode], false, mode, "main")
+		end
 		local graphModes = { "damage", "healing", "boss", "taken", "party" }
 		local gi
 		for gi = 1, table.getn(graphModes) do
@@ -3531,17 +4118,29 @@ local function refreshWindow(win)
 		local function measureCol(fs, header, kind)
 			local wide = textWidth(fs, header)
 			local nums = 0
-			-- Kill counts gain digits all run. A live width pushes the icons
-			-- left each time the widest count grows, so reserve a stable slot.
+			-- The column stays wide enough for 99999 so the digits do not jump.
+			-- The name only stops for the digits on screen, so a short count
+			-- does not cut the spell off in front of an empty slot.
 			if kind == "kills" then
 				local reserved = textWidth(fs, "99999")
 				if reserved > wide then
 					wide = reserved
 				end
-				if reserved < 8 then
-					reserved = 8
+				local live = 0
+				local ki
+				for ki = 1, n do
+					local entry = sorted[ki]
+					if entry and not entry.child and (entry.kills or 0) > 0 then
+						local kw = textWidth(fs, tostring(entry.kills))
+						if kw > live then
+							live = kw
+						end
+					end
 				end
-				return wide + 4, reserved + 2
+				if live < 8 then
+					live = 8
+				end
+				return wide + 4, live + 2
 			end
 			local i
 			for i = 1, n do
@@ -3702,7 +4301,11 @@ local function refreshWindow(win)
 		end
 	end
 	if win.graphBtn then
-		tintSparkIcon(win.graphBtn, isGraphOpen(mode))
+		if win == frame then
+			tintSparkIcon(win.graphBtn, isMainGraphOpen())
+		else
+			tintSparkIcon(win.graphBtn, isGraphOpen(mode))
+		end
 	end
 	if killView and (state.kills or 0) > 0 then
 		win.countText:SetText(state.kills .. (state.kills == 1 and " kill" or " kills"))
@@ -3783,7 +4386,7 @@ local function refreshWindow(win)
 		if nproc > K.TRAIL then
 			nproc = K.TRAIL
 		end
-		-- Match ICON_STEP used when placing trail icons (14 + 4).
+		-- Match ICON_STEP used when placing trail icons (12 + 4).
 		return nproc
 	end
 	local listW = rowWidth(win)
@@ -3808,7 +4411,7 @@ local function refreshWindow(win)
 					rankGap = (fs:GetStringWidth() or 0) + 6
 				end
 			end
-			local avail = listW - nameLeft - rankGap - numW - trailIcons(entry) * 18
+			local avail = listW - nameLeft - rankGap - numW - trailIcons(entry) * 16
 			if avail < 48 then
 				avail = 48
 			end
@@ -3925,7 +4528,7 @@ local function refreshWindow(win)
 			row:SetPoint("TOPLEFT", row:GetParent(), "TOPLEFT", 0, -rowY)
 			row:SetWidth(rowWidth(win))
 			row:SetHeight(rowH)
-			row.bar:SetHeight(rowH)
+			row.bar:SetHeight(rowH - 2)
 			rowY = rowY + rowH
 			local classCoord = nil
 			if data.classKey then
@@ -4046,7 +4649,7 @@ local function refreshWindow(win)
 					end
 				end
 			end
-			local ICON_W = 14
+			local ICON_W = 12
 			local ICON_GAP = 4
 			local ICON_STEP = ICON_W + ICON_GAP
 			local procs = data.procs
@@ -4120,6 +4723,11 @@ local function refreshWindow(win)
 			if room < 12 then
 				room = 12
 			end
+			-- A width left over from a shorter window reports the cut-off
+			-- text. Measure the whole name, then stop at the numbers.
+			if row.name.SetWidth then
+				row.name:SetWidth(rowW)
+			end
 			local textW = 0
 			if row.name.GetStringWidth then
 				textW = row.name:GetStringWidth() or 0
@@ -4155,15 +4763,33 @@ local function refreshWindow(win)
 			end
 			row.bar:SetWidth(math.max(2, (row:GetWidth() or 1) * fill))
 			local br, bg, bb, ba
-			if data.child then
-				br, bg, bb, ba = tint[1], tint[2], tint[3], 0.4
-			elseif first + i == 1 then
-				br, bg, bb, ba = tint[4], tint[5], tint[6], 0.9
-			else
-				br, bg, bb, ba = tint[1], tint[2], tint[3], 0.75
+			local fade = first + i - 1
+			if fade > 4 then
+				fade = 4
 			end
+			if savedLook and savedLook.sameBright then
+				fade = 0
+			end
+			br = tint[4] * 0.58 * (1 - fade * 0.22)
+			bg = tint[5] * 0.58 * (1 - fade * 0.22)
+			bb = tint[6] * 0.58 * (1 - fade * 0.22)
+			ba = 0.88 - fade * 0.08
+			if data.child and not (savedLook and savedLook.sameBright) then
+				br, bg, bb = br * 0.55, bg * 0.55, bb * 0.55
+				ba = 0.4
+			end
+			row.hiR = tint[4] * 0.58
+			row.hiG = tint[5] * 0.58
+			row.hiB = tint[6] * 0.58
+			row.hiA = 0.88
 			row.barR, row.barG, row.barB, row.barA = br, bg, bb, ba
+			if row.hover then
+				br, bg, bb, ba = row.hiR, row.hiG, row.hiB, row.hiA
+			end
 			row.bar:SetVertexColor(br, bg, bb, ba)
+			if row.barEdge then
+				row.barEdge:SetVertexColor(math.min(1, br + 0.18), math.min(1, bg + 0.12), math.min(1, bb + 0.06), 0.5)
+			end
 			if row.glow then
 				if row.hover then
 					row.glow:SetVertexColor(math.min(1, br + 0.35), math.min(1, bg + 0.28), math.min(1, bb + 0.2), 0.28)
@@ -4194,7 +4820,7 @@ local function refreshWindow(win)
 					end
 				end
 				btn:ClearAllPoints()
-				btn:SetPoint("LEFT", row, "LEFT", px, 0)
+				btn:SetPoint("TOPLEFT", row, "TOPLEFT", px, -2)
 				btn:Show()
 			end
 			-- Sit just after the name. A long name stops where the numbers begin.
@@ -5095,9 +5721,50 @@ function paintPopIcon(parent)
 end
 
 -- Hide the title when the header is too tight, instead of clipping to "...".
+-- The totals then sit where that name was, left aligned.
 function fitBrandTitle(win)
 	if not win or not win.brandText then
 		return
+	end
+	local function parkNumbers(onLeft)
+		local totalBtn = win.totalBtn
+		local dpsBtn = win.dpsBtn
+		if not totalBtn or not dpsBtn then
+			return
+		end
+		totalBtn:ClearAllPoints()
+		dpsBtn:ClearAllPoints()
+		if win.totalText then
+			win.totalText:ClearAllPoints()
+		end
+		if win.dpsText then
+			win.dpsText:ClearAllPoints()
+		end
+		if onLeft and win.brandIcon then
+			totalBtn:SetPoint("LEFT", win.brandIcon, "RIGHT", 4, 0)
+			dpsBtn:SetPoint("LEFT", totalBtn, "RIGHT", 4, 0)
+			if win.totalText then
+				win.totalText:SetPoint("LEFT", totalBtn, "LEFT", 0, 0)
+				win.totalText:SetJustifyH("LEFT")
+			end
+			if win.dpsText then
+				win.dpsText:SetPoint("LEFT", dpsBtn, "LEFT", 0, 0)
+				win.dpsText:SetJustifyH("LEFT")
+			end
+		else
+			if win.numHome then
+				dpsBtn:SetPoint("RIGHT", win.numHome, "LEFT", -8, 0)
+			end
+			totalBtn:SetPoint("RIGHT", dpsBtn, "LEFT", -4, 0)
+			if win.totalText then
+				win.totalText:SetPoint("RIGHT", totalBtn, "RIGHT", 0, 0)
+				win.totalText:SetJustifyH("RIGHT")
+			end
+			if win.dpsText then
+				win.dpsText:SetPoint("RIGHT", dpsBtn, "RIGHT", 0, 0)
+				win.dpsText:SetJustifyH("RIGHT")
+			end
+		end
 	end
 	local fs = win.brandText
 	local need = 0
@@ -5113,18 +5780,36 @@ function fitBrandTitle(win)
 		leftEdge = win.brand:GetRight()
 	end
 	local rightEdge = nil
-	if win.totalBtn and win.totalBtn.GetLeft then
+	if win.numHome and win.numHome.GetLeft then
+		local homeLeft = win.numHome:GetLeft()
+		local dpsW = 0
+		local totalW = 0
+		if homeLeft and win.dpsBtn and win.dpsBtn.GetWidth then
+			dpsW = win.dpsBtn:GetWidth() or 0
+		end
+		if homeLeft and win.totalBtn and win.totalBtn.GetWidth then
+			totalW = win.totalBtn:GetWidth() or 0
+		end
+		if homeLeft then
+			-- Where the total's left edge sits while the numbers stay on the right.
+			rightEdge = homeLeft - dpsW - totalW - 12
+		end
+	end
+	if not rightEdge and win.totalBtn and win.totalBtn.GetLeft then
 		rightEdge = win.totalBtn:GetLeft()
 	end
 	if not leftEdge or not rightEdge then
 		fs:Show()
+		parkNumbers(false)
 		return
 	end
 	local room = rightEdge - leftEdge - 8
 	if room < 12 or need > room then
 		fs:Hide()
+		parkNumbers(true)
 	else
 		fs:Show()
+		parkNumbers(false)
 	end
 end
 
@@ -5164,14 +5849,18 @@ function makeChromeIcon(parent, name)
 	return b
 end
 
-function paintDpsGraph(win, hist, on, mode)
+function paintDpsGraph(win, hist, on, mode, link)
 	if win ~= frame then
 		return
 	end
 	if not mode then
 		mode = "damage"
 	end
-	local box = graphBoxes[mode]
+	local boxKey = mode
+	if link and link ~= "" then
+		boxKey = link
+	end
+	local box = graphBoxes[boxKey]
 	if not on then
 		if box then
 			box.graphLive = false
@@ -5357,6 +6046,57 @@ function paintDpsGraph(win, hist, on, mode)
 		addStamp(target, plot, x, y0, 1 - frac)
 		addStamp(target, plot, x, y0 + 1, frac)
 	end
+	-- One texture for a steep jump. A column of dots gaps out and costs more.
+	local function addRise(target, plot, x, y1, y2)
+		if y2 < y1 then
+			local swap = y1
+			y1 = y2
+			y2 = swap
+		end
+		x = math.floor(x + 0.5)
+		y1 = math.floor(y1 + 0.5)
+		y2 = math.floor(y2 + 0.5)
+		local maxX = (target.plotW or 0) - 1
+		local maxY = (target.plotH or 0) - 1
+		if maxX > 2 then
+			if x < 1 then
+				x = 1
+			elseif x > maxX then
+				x = maxX
+			end
+		end
+		if maxY > 2 then
+			if y1 < 1 then
+				y1 = 1
+			end
+			if y2 > maxY then
+				y2 = maxY
+			end
+		end
+		local h = y2 - y1
+		if h < 2 then
+			plotDot(target, plot, x, y1)
+			return
+		end
+		if not target.stamps then
+			target.stamps = {}
+		end
+		local n = (target.stampCount or 0) + 1
+		target.stampCount = n
+		local tex = target.stamps[n]
+		if not tex then
+			local host = target.stampHost or plot
+			tex = host:CreateTexture(nil, "ARTWORK")
+			tex:SetTexture(K.SOLID)
+			target.stamps[n] = tex
+		end
+		tex:SetWidth(1)
+		tex:SetHeight(h)
+		tex:ClearAllPoints()
+		tex:SetPoint("BOTTOM", target.stampHost or plot, "BOTTOMLEFT", x, y1)
+		tex:SetVertexColor(1, 0.82, 0.35, 1)
+		tex:Show()
+	end
 	local function stroke(target, plot, x1, y1, x2, y2)
 		local dx = x2 - x1
 		local dy = y2 - y1
@@ -5374,14 +6114,18 @@ function paintDpsGraph(win, hist, on, mode)
 		end
 	end
 	if not box then
-		local tag = mode
+		local tag = boxKey
 		box = CreateFrame("Frame", "AZSSpellMeterGraph_" .. tag, UIParent)
-		graphBoxes[mode] = box
-		box.graphMode = mode
+		graphBoxes[boxKey] = box
+		box.graphMode = boxKey
+		box.mode = mode
+		if link and link ~= "" then
+			box.linkKey = link
+		end
 		local savedOpen = graphSlot(mode)
 		local openW = 380
 		local openH = 200
-		local slotOpen = savedOpen.graphBy and savedOpen.graphBy[mode]
+		local slotOpen = savedOpen.graphBy and savedOpen.graphBy[boxKey]
 		if slotOpen then
 			openW = tonumber(slotOpen.w) or openW
 			openH = tonumber(slotOpen.h) or openH
@@ -5478,7 +6222,11 @@ function paintDpsGraph(win, hist, on, mode)
 		paintX(closeBtn)
 		box.closeBtn = closeBtn
 		closeBtn:SetScript("OnClick", function()
-			setGraphOpen(box.graphMode or box.mode or mode, false)
+			if box.linkKey then
+				setMainGraphOpen(false)
+			else
+				setGraphOpen(box.mode or mode, false)
+			end
 			box.graphLive = false
 			box:Hide()
 			refresh()
@@ -5497,7 +6245,7 @@ function paintDpsGraph(win, hist, on, mode)
 			applyGraphCompact(box)
 			saveGraphSlot(box)
 			box.needDraw = true
-			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode, box.linkKey)
 		end)
 		compactBtn:SetScript("OnEnter", function()
 			if box.compact then
@@ -5531,7 +6279,7 @@ function paintDpsGraph(win, hist, on, mode)
 			box.lockFull = false
 			box.follow = true
 			box.needDraw = true
-			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode, box.linkKey)
 		end)
 		followBtn:SetScript("OnEnter", function()
 			showTip(this, "RIGHT", "Follow", nil, {
@@ -5564,7 +6312,7 @@ function paintDpsGraph(win, hist, on, mode)
 				box.axisMax = nil
 			end
 			box.needDraw = true
-			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode, box.linkKey)
 		end)
 		fullBtn:SetScript("OnEnter", function()
 			showTip(this, "RIGHT", "Full", nil, {
@@ -5616,7 +6364,7 @@ function paintDpsGraph(win, hist, on, mode)
 			end
 			saved.graphAmount = box.showAmount
 			box.needDraw = true
-			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode, box.linkKey)
 		end
 		amountBtn:SetScript("OnClick", function()
 			setGraphMetric(true)
@@ -5758,7 +6506,7 @@ function paintDpsGraph(win, hist, on, mode)
 				box.viewSpan = span
 			end
 			box.needDraw = true
-			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode, box.linkKey)
 		end)
 		zoomReset:SetScript("OnEnter", function()
 			showTip(this, "RIGHT", "Reset zoom", nil, {
@@ -5876,7 +6624,7 @@ function paintDpsGraph(win, hist, on, mode)
 			box.sizing = false
 			saveGraphBox()
 			box.needDraw = true
-			paintDpsGraph(frame, rateHist[box.graphMode or box.mode or "damage"], true, box.graphMode or box.mode)
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode, box.linkKey)
 		end)
 		box:SetScript("OnUpdate", function()
 			if not box.sizing then
@@ -5886,7 +6634,7 @@ function paintDpsGraph(win, hist, on, mode)
 				box.sizing = false
 				saveGraphBox()
 				box.needDraw = true
-				paintDpsGraph(frame, rateHist[box.graphMode or box.mode or "damage"], true, box.graphMode or box.mode)
+				paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode, box.linkKey)
 				return
 			end
 			local scale = 1
@@ -5967,7 +6715,7 @@ function paintDpsGraph(win, hist, on, mode)
 				box.lockFull = false
 			end
 			box.needDraw = true
-			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode)
+			paintDpsGraph(frame, rateHist[box.mode or "damage"], true, box.mode, box.linkKey)
 		end
 		box.applyView = applyView
 		plot:SetScript("OnMouseWheel", function()
@@ -6246,10 +6994,10 @@ function paintDpsGraph(win, hist, on, mode)
 			applyView(start, span, false)
 		end)
 		local saved = graphSlot(mode)
-		local slot = saved.graphBy and saved.graphBy[mode]
+		local slot = saved.graphBy and saved.graphBy[boxKey]
 		if slot and slot.x ~= nil then
 			box:SetPoint(slot.point or "TOPLEFT", UIParent, slot.rel or "TOPLEFT", slot.x, slot.y)
-		elseif mode == "damage" and saved.graphPoint and saved.graphX ~= nil then
+		elseif boxKey == "damage" and saved.graphPoint and saved.graphX ~= nil then
 			box:SetPoint(saved.graphPoint, UIParent, saved.graphRel or "TOPLEFT", saved.graphX, saved.graphY)
 		else
 			parkBeside(box, frame)
@@ -6273,7 +7021,7 @@ function paintDpsGraph(win, hist, on, mode)
 		box.viewStart = nil
 		box.viewSpan = 30
 		box.graphLive = false
-		local slotCompact = saved.graphBy and saved.graphBy[mode]
+		local slotCompact = saved.graphBy and saved.graphBy[boxKey]
 		if slotCompact and slotCompact.compact then
 			box.compact = true
 		else
@@ -6292,9 +7040,16 @@ function paintDpsGraph(win, hist, on, mode)
 			box.viewSpan = 30
 		end
 	end
+	if box.mode and box.mode ~= mode then
+		box.needDraw = true
+	end
 	box.painting = true
 	box.mode = mode
-	box.graphMode = mode
+	if box.linkKey then
+		box.graphMode = box.linkKey
+	else
+		box.graphMode = mode
+	end
 	if box.showAmount == nil then
 		local savedMetric = config().look
 		box.showAmount = savedMetric and savedMetric.graphAmount and true or false
@@ -6634,7 +7389,9 @@ function paintDpsGraph(win, hist, on, mode)
 			if dx < 0 then
 				dx = -dx
 			end
-			if dx <= 1.5 then
+			if y - prevY > 2 or prevY - y > 2 then
+				addRise(box, plot, x, prevY, y)
+			elseif dx <= 1.5 then
 				plotDot(box, plot, x, y)
 			else
 				stroke(box, plot, prevX, prevY, x, y)
@@ -6833,26 +7590,50 @@ local function paintTip(title, icon, lines)
 		count = 12
 	end
 	ensureTipParts(tip, 12, 0)
-	local i
-	for i = 1, table.getn(tip.lines) do
-		local fs = tip.lines[i]
-		if i <= count then
-			local line = lines[i]
-			fs:SetText(line[1] or "")
-			fs:SetTextColor(line[2] or 1, line[3] or 1, line[4] or 1)
-			fs:ClearAllPoints()
-			fs:SetPoint("TOPLEFT", tip, "TOPLEFT", 8, y)
-			fs:Show()
-			if fs.GetStringWidth then
-				local lw = (fs:GetStringWidth() or 0) + 16
-				if lw > widest then
-					widest = lw
-				end
+	local slot = 1
+	local startAt = 1
+	if icon and lines and lines[1] and lines[1][5] then
+		local fs = tip.lines[1]
+		local sub = lines[1]
+		fs:SetText(sub[1] or "")
+		fs:SetTextColor(0.55, 0.46, 0.28)
+		fs:ClearAllPoints()
+		fs:SetPoint("TOPLEFT", tip, "TOPLEFT", left, -20)
+		fs:Show()
+		if fs.GetStringWidth then
+			local lw = left + (fs:GetStringWidth() or 0) + 10
+			if lw > widest then
+				widest = lw
 			end
-			y = y - 13
-		else
-			fs:Hide()
 		end
+		slot = 2
+		startAt = 2
+	end
+	local i
+	for i = startAt, count do
+		local fs = tip.lines[slot]
+		slot = slot + 1
+		local line = lines[i]
+		fs:SetText(line[1] or "")
+		if line[5] then
+			fs:SetTextColor(0.55, 0.46, 0.28)
+		else
+			fs:SetTextColor(line[2] or 1, line[3] or 1, line[4] or 1)
+		end
+		fs:ClearAllPoints()
+		fs:SetPoint("TOPLEFT", tip, "TOPLEFT", 8, y)
+		fs:Show()
+		if fs.GetStringWidth then
+			local lw = (fs:GetStringWidth() or 0) + 16
+			if lw > widest then
+				widest = lw
+			end
+		end
+		y = y - 13
+	end
+	while slot <= table.getn(tip.lines) do
+		tip.lines[slot]:Hide()
+		slot = slot + 1
 	end
 	if widest < 96 then
 		widest = 96
@@ -6918,10 +7699,29 @@ local function paintTipBlocks(blocks)
 				widest = hw
 			end
 		end
-		y = y - 20
 		local lines = block.lines or {}
+		local startAt = 1
+		if tex and tex ~= "" and lines[1] and lines[1][5] then
+			local fs = tip.lines[lineIdx]
+			lineIdx = lineIdx + 1
+			fs:SetText(lines[1][1] or "")
+			fs:SetTextColor(0.55, 0.46, 0.28)
+			fs:ClearAllPoints()
+			fs:SetPoint("TOPLEFT", tip, "TOPLEFT", left, y - 14)
+			fs:Show()
+			if fs.GetStringWidth then
+				local lw = left + (fs:GetStringWidth() or 0) + 10
+				if lw > widest then
+					widest = lw
+				end
+			end
+			startAt = 2
+			y = y - 30
+		else
+			y = y - 20
+		end
 		local li
-		for li = 1, table.getn(lines) do
+		for li = startAt, table.getn(lines) do
 			local fs = tip.lines[lineIdx]
 			lineIdx = lineIdx + 1
 			local line = lines[li]
@@ -7156,15 +7956,39 @@ local function createRow(parent, index)
 
 	local bar = row:CreateTexture(nil, "BORDER")
 	bar:SetTexture(K.SOLID)
-	bar:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
-	bar:SetHeight(K.ROW_H)
+	bar:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -1)
+	bar:SetHeight(K.ROW_H - 2)
 	bar:SetWidth(1)
 	bar:SetVertexColor(0.42, 0.2, 0.08, 0.75)
 	row.bar = bar
 
+	local barEdge = row:CreateTexture(nil, "ARTWORK")
+	barEdge:SetTexture(K.SOLID)
+	barEdge:SetPoint("TOPLEFT", bar, "TOPLEFT", 0, 0)
+	barEdge:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
+	barEdge:SetHeight(1)
+	barEdge:SetVertexColor(1, 0.9, 0.6, 0.55)
+	row.barEdge = barEdge
+
+	local barFoot = row:CreateTexture(nil, "ARTWORK")
+	barFoot:SetTexture(K.SOLID)
+	barFoot:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", 0, 0)
+	barFoot:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+	barFoot:SetHeight(1)
+	barFoot:SetVertexColor(0, 0, 0, 0.8)
+	row.barFoot = barFoot
+
+	local barCap = row:CreateTexture(nil, "ARTWORK")
+	barCap:SetTexture(K.SOLID)
+	barCap:SetWidth(1)
+	barCap:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
+	barCap:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+	barCap:SetVertexColor(0, 0, 0, 0.65)
+	row.barCap = barCap
+
 	local rule = row:CreateTexture(nil, "BORDER")
 	rule:SetTexture(K.SOLID)
-	rule:SetVertexColor(0, 0, 0, 0.65)
+	rule:SetVertexColor(0, 0, 0, 0.9)
 	rule:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
 	rule:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, 0)
 	rule:SetHeight(1)
@@ -7285,17 +8109,48 @@ local function createRow(parent, index)
 	kills:SetPoint("RIGHT", damage, "LEFT", -6, 0)
 	name:SetPoint("RIGHT", kills, "LEFT", -4, 0)
 
+	local function upgradeRank(name)
+		if not name or name == "" or not AZS_SPELLS then
+			return nil
+		end
+		local want = compactKey(name)
+		local alt = compactKey(englishSpell(name))
+		local i
+		for i = 1, table.getn(AZS_SPELLS) do
+			local sp = AZS_SPELLS[i]
+			local key = compactKey(sp and sp.key)
+			if key ~= "" and (key == want or key == alt) then
+				local rank = tonumber(sp.rank)
+				if rank and rank >= 1 then
+					return "Rank " .. math.floor(rank + 0.5)
+				end
+				return nil
+			end
+		end
+		return nil
+	end
+
 	row:SetScript("OnEnter", function()
 		local owner = this
 		owner.hover = true
-		if owner.glow then
-			local r, g, b = 1, 0.86, 0.5
-			if owner.barR then
-				r = math.min(1, owner.barR + 0.35)
-				g = math.min(1, owner.barG + 0.28)
-				b = math.min(1, owner.barB + 0.2)
+		local r, g, b = owner.barR, owner.barG, owner.barB
+		if owner.hiR then
+			r, g, b = owner.hiR, owner.hiG, owner.hiB
+			if owner.bar then
+				owner.bar:SetVertexColor(r, g, b, owner.hiA)
 			end
-			owner.glow:SetVertexColor(r, g, b, 0.28)
+			if owner.barEdge then
+				owner.barEdge:SetVertexColor(math.min(1, r + 0.18), math.min(1, g + 0.12), math.min(1, b + 0.06), 0.5)
+			end
+		end
+		if owner.glow then
+			local gr, gg, gb = 1, 0.86, 0.5
+			if r then
+				gr = math.min(1, r + 0.35)
+				gg = math.min(1, g + 0.28)
+				gb = math.min(1, b + 0.2)
+			end
+			owner.glow:SetVertexColor(gr, gg, gb, 0.28)
 		end
 		trackTip(owner, function()
 			local data = owner.data
@@ -7385,11 +8240,27 @@ local function createRow(parent, index)
 			if not data.classKey then
 				tipIcon = rowIcon(data)
 			end
+			local tipMode = host and host.fixed
+			if not tipMode then
+				tipMode = viewMode()
+			end
+			if tipMode ~= "party" then
+				local rankText = upgradeRank(data.name)
+				if rankText then
+					table.insert(lines, 1, { rankText, 0.55, 0.46, 0.28, true })
+				end
+			end
 			paintTip(data.shown or data.name, tipIcon, lines)
 		end)
 	end)
 	row:SetScript("OnLeave", function()
 		this.hover = nil
+		if this.bar and this.barR then
+			this.bar:SetVertexColor(this.barR, this.barG, this.barB, this.barA)
+		end
+		if this.barEdge and this.barR then
+			this.barEdge:SetVertexColor(math.min(1, this.barR + 0.18), math.min(1, this.barG + 0.12), math.min(1, this.barB + 0.06), 0.5)
+		end
 		if this.glow then
 			this.glow:SetVertexColor(1, 0.86, 0.5, 0)
 		end
@@ -7400,8 +8271,8 @@ local function createRow(parent, index)
 	local pi
 	for pi = 1, K.TRAIL do
 		local btn = CreateFrame("Button", nil, row)
-		btn:SetWidth(14)
-		btn:SetHeight(14)
+		btn:SetWidth(12)
+		btn:SetHeight(12)
 		btn:SetFrameLevel((row:GetFrameLevel() or 1) + 2)
 		btn:SetBackdrop(panelBackdrop())
 		btn:SetBackdropColor(0, 0, 0, 1)
@@ -7412,7 +8283,7 @@ local function createRow(parent, index)
 		icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 		btn.icon = icon
 		local badge = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		badge:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 1, -1)
+		badge:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1, 1)
 		badge:SetJustifyH("RIGHT")
 		face(badge, 8)
 		badge:SetTextColor(1, 0.92, 0.7)
@@ -7478,6 +8349,16 @@ local function createRow(parent, index)
 						table.insert(lines, { "Minion.", 0.65, 0.78, 1 })
 					else
 						table.insert(lines, { "Proc.", 0.65, 0.78, 1 })
+					end
+					local tipMode = host and host.fixed
+					if not tipMode then
+						tipMode = viewMode()
+					end
+					if tipMode ~= "party" then
+						local rankText = upgradeRank(info.name)
+						if rankText then
+							table.insert(lines, 1, { rankText, 0.55, 0.46, 0.28, true })
+						end
 					end
 					return lines
 				end
@@ -7909,7 +8790,7 @@ createDetached = function(mode)
 		end
 		showTip(this, "RIGHT", title .. " graph", nil, {
 			{ line, 1, 1, 1 },
-			{ "Each view can have its own graph open at the same time.", 0.75, 0.75, 0.75 },
+			{ "This graph stays on this view.", 0.75, 0.75, 0.75 },
 		})
 	end)
 	graphBtn:SetScript("OnLeave", function()
@@ -7917,6 +8798,7 @@ createDetached = function(mode)
 		leaveTip()
 	end)
 	win.graphBtn = graphBtn
+	win.numHome = graphBtn
 
 	local dpsBtn = CreateFrame("Button", "AZSSpellMeter" .. mode .. "Dps", header)
 	dpsBtn:SetPoint("RIGHT", graphBtn, "LEFT", -8, 0)
@@ -8399,7 +9281,7 @@ local function buildSettings()
 	local box = CreateFrame("Frame", "AZSSpellMeterSettings", UIParent)
 	settings = box
 	box:SetWidth(248)
-	box:SetHeight(730)
+	box:SetHeight(748)
 	box:SetFrameStrata("DIALOG")
 	box:SetMovable(true)
 	box:EnableMouse(true)
@@ -8651,20 +9533,22 @@ local function buildSettings()
 	box.cdMark = box.cdHit.mark
 	box.fillTopHit = makeCheck(-356, "Bars vs top spell")
 	box.fillTopMark = box.fillTopHit.mark
+	box.sameBrightHit = makeCheck(-374, "Same brightness")
+	box.sameBrightMark = box.sameBrightHit.mark
 
-	sectionTitle(-378, "Columns")
-	box.colKillHit = makeCheck(-396, "Kills", 12, 110)
-	box.colDmgHit = makeCheck(-396, "Amount", 124, 110)
-	box.colShareHit = makeCheck(-414, "Share", 12, 110)
-	box.colDpsHit = makeCheck(-414, "DPS", 124, 110)
+	sectionTitle(-396, "Columns")
+	box.colKillHit = makeCheck(-414, "Kills", 12, 110)
+	box.colDmgHit = makeCheck(-414, "Amount", 124, 110)
+	box.colShareHit = makeCheck(-432, "Share", 12, 110)
+	box.colDpsHit = makeCheck(-432, "DPS", 124, 110)
 
-	sectionTitle(-436, "Views")
-	box.tabDamageHit = makeCheck(-454, "Damage", 12, 110)
-	box.tabHealingHit = makeCheck(-454, "Healing", 124, 110)
-	box.tabBossHit = makeCheck(-472, "Boss", 12, 110)
-	box.tabTakenHit = makeCheck(-472, "Taken", 124, 110)
+	sectionTitle(-454, "Views")
+	box.tabDamageHit = makeCheck(-472, "Damage", 12, 110)
+	box.tabHealingHit = makeCheck(-472, "Healing", 124, 110)
+	box.tabBossHit = makeCheck(-490, "Boss", 12, 110)
+	box.tabTakenHit = makeCheck(-490, "Taken", 124, 110)
 
-	sectionTitle(-494, "Colors")
+	sectionTitle(-512, "Colors")
 
 	local picks = {
 		{ key = "panel", name = "Window", tip = "Background of the meter windows." },
@@ -8685,7 +9569,7 @@ local function buildSettings()
 		local b = CreateFrame("Button", nil, box)
 		b:SetWidth(sw)
 		b:SetHeight(sw)
-		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -512)
+		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -530)
 		b:SetBackdrop(roundBackdrop(8))
 		b.key = spec.key
 		b.pickName = spec.name
@@ -8707,15 +9591,15 @@ local function buildSettings()
 	end
 
 	local caption = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -540)
+	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -558)
 	caption:SetText("Window")
 	face(caption, 10)
 	caption:SetTextColor(1, 0.9, 0.62)
 	box.caption = caption
 
-	local redSlider, redValue, redName = makeSlider(-558, "Red", 0, 255, 1)
-	local greenSlider, greenValue, greenName = makeSlider(-590, "Green", 0, 255, 1)
-	local blueSlider, blueValue, blueName = makeSlider(-622, "Blue", 0, 255, 1)
+	local redSlider, redValue, redName = makeSlider(-576, "Red", 0, 255, 1)
+	local greenSlider, greenValue, greenName = makeSlider(-608, "Green", 0, 255, 1)
+	local blueSlider, blueValue, blueName = makeSlider(-640, "Blue", 0, 255, 1)
 	redName:SetTextColor(1, 0.55, 0.45)
 	greenName:SetTextColor(0.55, 0.9, 0.55)
 	blueName:SetTextColor(0.55, 0.75, 1)
@@ -8807,6 +9691,11 @@ local function buildSettings()
 			box.fillTopHit.mark:Show()
 		else
 			box.fillTopHit.mark:Hide()
+		end
+		if lookValue("sameBright") then
+			box.sameBrightHit.mark:Show()
+		else
+			box.sameBrightHit.mark:Hide()
 		end
 		local function showCol(hit, key)
 			if lookValue(key) == false then
@@ -9112,6 +10001,25 @@ local function buildSettings()
 		})
 	end)
 	box.fillTopHit:SetScript("OnLeave", function()
+		leaveTip()
+	end)
+	box.sameBrightHit:SetScript("OnClick", function()
+		local saved = ensureLook()
+		if saved.sameBright then
+			saved.sameBright = nil
+		else
+			saved.sameBright = true
+		end
+		box.sync()
+		refresh()
+	end)
+	box.sameBrightHit:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "Same brightness", nil, {
+			{ "Every bar uses one shade.", 1, 1, 1 },
+			{ "Turn this off and each spell down the list is darker than the one above it.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	box.sameBrightHit:SetScript("OnLeave", function()
 		leaveTip()
 	end)
 	local function bindCol(hit, key, title, line)
@@ -9497,21 +10405,18 @@ local function buildMainChrome()
 	graphBtn:SetPoint("RIGHT", popBtn, "LEFT", -4, 0)
 	paintSparkIcon(graphBtn)
 	graphBtn:SetScript("OnClick", function()
-		local mode = viewMode()
-		setGraphOpen(mode, not isGraphOpen(mode))
+		setMainGraphOpen(not isMainGraphOpen())
 		refresh()
 	end)
 	graphBtn:SetScript("OnEnter", function()
 		graphBtn:SetBackdropBorderColor(1, 0.86, 0.45, 1)
-		local mode = viewMode()
-		local title = VIEW_TITLE[mode] or "Graph"
-		local line = "Open the " .. string.lower(title) .. " graph."
-		if isGraphOpen(mode) then
-			line = "Close the " .. string.lower(title) .. " graph."
+		local line = "Open a graph that follows this window."
+		if isMainGraphOpen() then
+			line = "Close the graph for this window."
 		end
-		showTip(this, "RIGHT", title .. " graph", nil, {
+		showTip(this, "RIGHT", "Graph", nil, {
 			{ line, 1, 1, 1 },
-			{ "Each view can have its own graph open at the same time.", 0.75, 0.75, 0.75 },
+			{ "It switches when you change tabs, such as from Damage to Healing.", 0.75, 0.75, 0.75 },
 		})
 	end)
 	graphBtn:SetScript("OnLeave", function()
@@ -9560,6 +10465,7 @@ local function buildMainChrome()
 	end)
 	frame.resetBtn = resetBtn
 	frame.resetText = resetText
+	frame.numHome = resetBtn
 
 	local dpsBtn = CreateFrame("Button", "AZSSpellMeterDps", header)
 	dpsBtn:SetPoint("RIGHT", resetBtn, "LEFT", -8, 0)
