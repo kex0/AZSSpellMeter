@@ -44,6 +44,13 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ## Changelog
 
+### 1.38
+
+Tested with game 0.135.1.
+
+- The minimized meter stays where you left it. A new run no longer sends it back to the center of the screen. Opening it puts the window on the bubble.
+- Right-click the minimized meter to switch it between total damage, DPS, and kills. The tip names the one it is showing.
+
 ### 1.37
 
 Tested with game 0.135.1.

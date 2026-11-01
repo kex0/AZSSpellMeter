@@ -4453,7 +4453,25 @@ local function refreshWindow(win)
 	end
 	win.dpsText:SetText(fmtRate(dps) .. " " .. string.lower(rateWord))
 	if win.bubbleText then
-		win.bubbleText:SetText(comma(board))
+		local show = config().bubbleMode or "damage"
+		local text = comma(board)
+		local tr, tg, tb = 1, 0.9, 0.55
+		if show == "kills" then
+			text = tostring((state and state.kills) or 0)
+		elseif show == "dps" then
+			local rate = dps
+			if mode ~= "damage" then
+				local head = AZSSpellMeter_Head
+				rate = head and head.rate or 0
+			end
+			text = fmtRate(rate)
+			tr, tg, tb = 0.78, 0.95, 0.72
+		elseif mode ~= "damage" then
+			local head = AZSSpellMeter_Head
+			text = comma(head and head.total or 0)
+		end
+		win.bubbleText:SetText(text)
+		win.bubbleText:SetTextColor(tr, tg, tb)
 		local bw = 36
 		if win.bubbleText.GetStringWidth then
 			bw = (win.bubbleText:GetStringWidth() or 24) + 16
@@ -5520,7 +5538,18 @@ function AZSSpellMeter_StoreRate(mode, rateMode, now)
 			end
 		end
 	end
-	recentRate(rateMode, now, meterTot, bucket)
+	local rate = recentRate(rateMode, now, meterTot, bucket)
+	if rateMode == "damage" then
+		local head = AZSSpellMeter_Head
+		if not head then
+			head = {}
+			AZSSpellMeter_Head = head
+		end
+		head.total = meterTot
+		if rate ~= nil then
+			head.rate = rate
+		end
+	end
 end
 
 function AZSSpellMeter_PickExtra()
@@ -5598,6 +5627,53 @@ local function savePoint()
 	cfg.rel = rel
 	cfg.x = x
 	cfg.y = y
+end
+
+function AZSSpellMeter_BubbleTip()
+	local show = config().bubbleMode or "damage"
+	local name = "Damage"
+	if show == "dps" then
+		name = "DPS"
+	elseif show == "kills" then
+		name = "Kills"
+	end
+	if not showTip or not bubble then
+		return
+	end
+	showTip(bubble, "RIGHT", "Spell meter", nil, {
+		{ name, 1, 0.86, 0.5 },
+		{ "Click to open the window. Right-click to change this number.", 1, 1, 1 },
+	})
+end
+
+function AZSSpellMeter_SaveBubble()
+	if not bubble or not bubble.GetPoint then
+		return
+	end
+	local point, _, rel, x, y = bubble:GetPoint(1)
+	if not point or x == nil or y == nil then
+		return
+	end
+	local cfg = config()
+	cfg.bubblePoint = point
+	cfg.bubbleRel = rel or "BOTTOMLEFT"
+	cfg.bubbleX = x
+	cfg.bubbleY = y
+end
+
+function AZSSpellMeter_PlaceBubble()
+	if not bubble then
+		return
+	end
+	local cfg = config()
+	bubble:ClearAllPoints()
+	if cfg.bubblePoint and cfg.bubbleX ~= nil and cfg.bubbleY ~= nil then
+		bubble:SetPoint(cfg.bubblePoint, UIParent, cfg.bubbleRel or "BOTTOMLEFT", cfg.bubbleX, cfg.bubbleY)
+		bubble.parked = true
+	else
+		bubble:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+		bubble.parked = false
+	end
 end
 
 -- Same visible area SetClampedToScreen uses: UIParent, in screen pixels.
@@ -5999,9 +6075,11 @@ local function placeDefault()
 	frame:ClearAllPoints()
 	frame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 16, -160)
 	if bubble then
-		bubble.parked = false
-		bubble:ClearAllPoints()
-		bubble:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+		cfg.bubblePoint = nil
+		cfg.bubbleRel = nil
+		cfg.bubbleX = nil
+		cfg.bubbleY = nil
+		AZSSpellMeter_PlaceBubble()
 	end
 	applyShown()
 	refresh()
@@ -10071,6 +10149,30 @@ function onMainWheel()
 end
 
 local function onMainUpdate()
+	if frame.snapToBubble then
+		local bx, by
+		if bubble then
+			bx, by = bubble:GetCenter()
+		end
+		local mx, my
+		if frame.minBtn then
+			mx, my = frame.minBtn:GetCenter()
+		end
+		local left = frame:GetLeft()
+		local top = frame:GetTop()
+		frame.snapToBubble = frame.snapToBubble + 1
+		if bx and by and mx and my and left and top then
+			frame:ClearAllPoints()
+			frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left + (bx - mx), top + (by - my))
+			if clampIntoView(frame, 120, 20) then
+				noteClamped()
+			end
+			savePoint()
+			frame.snapToBubble = nil
+		elseif frame.snapToBubble > 5 then
+			frame.snapToBubble = nil
+		end
+	end
 	if choiceHold and frame then
 		frame.cardWake = (frame.cardWake or 0) + (arg1 or 0)
 		if frame.cardWake >= 0.4 then
@@ -10170,9 +10272,11 @@ local function onBubbleUpdate()
 			bubble:ClearAllPoints()
 			bubble:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
 			bubble.parked = true
+			AZSSpellMeter_SaveBubble()
 		end
 	end
 	if config().mini and bubble.parked and not bubble.moving and clampIntoView(bubble, 36, 18) then
+		AZSSpellMeter_SaveBubble()
 		noteClamped()
 	end
 end
@@ -10331,6 +10435,7 @@ local function buildSettings()
 			savePoint()
 		end
 		if bubble and bubble:IsShown() and clampIntoView(bubble) then
+			AZSSpellMeter_SaveBubble()
 		end
 		local mode, pop
 		for mode, pop in pairs(popped) do
@@ -11216,6 +11321,7 @@ local function buildMainChrome()
 			bubble:ClearAllPoints()
 			bubble:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
 			bubble.parked = true
+			AZSSpellMeter_SaveBubble()
 		elseif bubble then
 			bubble.parked = false
 		end
@@ -11667,7 +11773,7 @@ local function buildMainList()
 	bubble:SetBackdrop(roundBackdrop(12))
 	bubble:SetBackdropColor(0.28, 0.16, 0.05, 0.9)
 	bubble:SetBackdropBorderColor(0.85, 0.62, 0.2, 1)
-	bubble:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+	AZSSpellMeter_PlaceBubble()
 	local bubbleText = bubble:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	bubbleText:SetPoint("CENTER", bubble, "CENTER", 0, 0)
 	bubbleText:SetJustifyH("CENTER")
@@ -11686,13 +11792,24 @@ local function buildMainList()
 	end)
 	bubble:SetScript("OnDragStop", function()
 		bubble:StopMovingOrSizing()
+		bubble.parked = true
+		AZSSpellMeter_SaveBubble()
 	end)
 	if bubble.RegisterForClicks then
 		bubble:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 	end
 	bubble:SetScript("OnClick", function()
 		if arg1 == "RightButton" then
-			toggleSettings()
+			local show = config().bubbleMode or "damage"
+			if show == "damage" then
+				config().bubbleMode = "dps"
+			elseif show == "dps" then
+				config().bubbleMode = "kills"
+			else
+				config().bubbleMode = nil
+			end
+			refresh()
+			AZSSpellMeter_BubbleTip()
 			return
 		end
 		if bubble.moving then
@@ -11700,14 +11817,13 @@ local function buildMainList()
 			return
 		end
 		config().mini = false
+		frame.snapToBubble = 0
 		applyShown()
 		refresh()
 	end)
 	bubble:SetScript("OnEnter", function()
 		bubble:SetBackdropBorderColor(1, 0.86, 0.45, 1)
-		showTip(this, "RIGHT", "Spell meter", nil, {
-			{ "Click to open the window. Right-click for settings.", 1, 1, 1 },
-		})
+		AZSSpellMeter_BubbleTip()
 	end)
 	bubble:SetScript("OnLeave", function()
 		applyLook(true)
