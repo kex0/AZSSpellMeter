@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.37
+
+Tested with game 0.131.0.
+
+- A party member opens into that hero's spells, healing, and boss damage. Back returns to the party list.
+- A pet's spell stays on the pet, and each minion keeps its own icon. Two or more demons still share the Minions row, and other pets share Pets.
+- A proc stays on the spell that cast it, as an icon beside that spell.
+- When the combat log names a minion, those hits, crits, and kills stay on that minion. Your own casts of the same spell stay on your spell.
+- Healing can show what you cast as well as what you received. The switch sits under the title and is remembered.
+- Spell icons, ranks, and which spell a proc belongs to come from the game.
+- Right-click a row to hide it. The total and DPS still include it. The row comes back when you change tabs, switch Received and Done, close and reopen an extra window, or the run resets.
+- Death Coil stays on the Succubus unless you have that skill selected.
+- A minion row is labeled x2, x3, and so on when more than one of that minion is out, including when it is opened under Minions. The same count is in its tip. One of that minion has no number, and the Minions row stays Minions.
+- Each spell alone lists a proc on its own row. A minion's attacks stay on that minion, and Under the spell can still open them. A spell is not also shown as an icon of itself.
+- A party member's spells follow Each spell alone. Received and Done stay inside the party window.
+- The party list no longer rebuilds every hero's spell history several times a second.
+- One window stays as light as the old meter. The bars read the totals the game already stored, instead of building a full breakdown report every tick.
+- The party list includes the other heroes again. Their totals are requested instead of reading only your own.
+- The party list switches between damage and healing from the icon on the column row. A sword is damage. The heal icon is healing each hero has done. The party graph follows that icon, and the icon stays visible on the level-up screen. Party damage and party healing both keep their graph line while the other one is showing.
+- A few seconds of lag no longer clears the graphs. The line stays and follows the run clock.
+- Extra views take turns. The window in front stays live, and opening more views does not rebuild all of them on the same frame. A graph redraws only when its line has new data.
+- A spell still gets its hits, crits, kills, and rank when the meter spells its name differently from the combat log or the spell book. Soul Fire and Soulfire count as the same spell, and the rank is the one on the spell you have selected.
+- Boss hits, crits, and kills are for the current boss fight.
+- A proc the game marks sits on the spell it came from, as an icon. That includes Splitting Ice on Frostbolt. Flurry, Shockwave, Mutilate, Blade Flurry, Conflagrate, and Sweeping Strikes do the same when the game calls them procs.
+- Presence of Mind stays on Arcane Missiles, Seal of Command on Judgement, and Divine Storm on Exorcism.
+- Righteous Hammer has an icon. Which spell it belongs to is still unknown, so it keeps its own row.
+
 ## 1.36
 
 Tested with game 0.131.0.

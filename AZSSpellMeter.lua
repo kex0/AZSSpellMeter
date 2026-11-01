@@ -83,6 +83,7 @@ local VIEW_TITLE = {
 local HEADER_TINT = {
 	damage = { 0.42, 0.24, 0.06, 0.90, 0.66, 0.22 },
 	healing = { 0.10, 0.28, 0.14, 0.45, 0.78, 0.40 },
+	partyHeal = { 0.10, 0.28, 0.14, 0.45, 0.78, 0.40 },
 	boss = { 0.40, 0.16, 0.06, 0.90, 0.45, 0.16 },
 	taken = { 0.36, 0.12, 0.10, 0.85, 0.35, 0.28 },
 	party = { 0.12, 0.18, 0.36, 0.45, 0.62, 0.95 },
@@ -484,10 +485,10 @@ local function parsePeriodic(msg)
 	if amount2 and owner then
 		local crit = string.find(msg, "%(Critical%)") and true or false
 		if UnitExists("pet") and owner == UnitName("pet") then
-			return petAttacker(owner), amount2, crit, cleanName(victim2)
+			return petAttacker(owner), amount2, crit, cleanName(victim2), cleanName(spell2)
 		end
 		if knownSummon(owner) then
-			return petAttacker(owner), amount2, crit, cleanName(victim2)
+			return petAttacker(owner), amount2, crit, cleanName(victim2), cleanName(spell2)
 		end
 	end
 	return nil
@@ -545,15 +546,15 @@ local function parsePet(msg, melee)
 	-- Crit before hit so "crits" is not eaten by a loose "hits" pattern.
 	_, _, owner, spell, victim, amount = string.find(msg, "^(.+)'s (.+) crits (.+) for (%d+)")
 	if owner and spell then
-		return petAttacker(owner), amount, true, cleanName(victim)
+		return petAttacker(owner), amount, true, cleanName(victim), cleanName(spell)
 	end
 	_, _, owner, spell, victim, amount = string.find(msg, "^(.+)'s (.+) hits (.+) for (%d+)")
 	if owner and spell then
-		return petAttacker(owner), amount, false, cleanName(victim)
+		return petAttacker(owner), amount, false, cleanName(victim), cleanName(spell)
 	end
 	_, _, owner, spell, victim, amount = string.find(msg, "^(.+)'s (.+) causes (.+) (%d+)")
 	if owner and spell then
-		return petAttacker(owner), amount, false, cleanName(victim)
+		return petAttacker(owner), amount, false, cleanName(victim), cleanName(spell)
 	end
 	if melee then
 		local attacker
@@ -601,6 +602,7 @@ local function note(spell, amount, crit, victim)
 	end
 	lastBlow[victim] = spell
 	lastHit = spell
+	AZSSpellMeter_SpellRev = (AZSSpellMeter_SpellRev or 0) + 1
 	local row = state.spells[spell]
 	if not row then
 		row = { damage = 0, hits = 0, crits = 0, kills = 0 }
@@ -636,17 +638,17 @@ local function note(spell, amount, crit, victim)
 	ingest = function(msg, kind)
 		msg = strip(msg)
 		lastRaw = msg
-		local spell, amount, crit, victim
+		local spell, amount, crit, victim, castName
 		if kind == "yours" then
 			spell, amount, crit, victim = parseYours(msg)
 		elseif kind == "periodic" then
-			spell, amount, crit, victim = parsePeriodic(msg)
+			spell, amount, crit, victim, castName = parsePeriodic(msg)
 		elseif kind == "pet" then
-			spell, amount, crit, victim = parsePet(msg, false)
+			spell, amount, crit, victim, castName = parsePet(msg, false)
 		elseif kind == "petmelee" then
 			spell, amount, crit, victim = parsePet(msg, true)
 		elseif kind == "summon" then
-			spell, amount, crit, victim = parsePet(msg, false)
+			spell, amount, crit, victim, castName = parsePet(msg, false)
 			if spell and not knownSummon(spell) then
 				return
 			end
@@ -657,23 +659,43 @@ local function note(spell, amount, crit, victim)
 			end
 		end
 		if spell then
-			-- Imp Fireball is logged as "Your Fireball"; warlocks do not cast it.
-			local map = AZSSpellMeter_MinionAbility
-			if map and (kind == "yours" or kind == "periodic") then
+			-- A line that names the minion stays on that minion. "Your Fireball"
+			-- moves to the one pet that casts it when the hero does not.
+			local castKeep = nil
+			if kind == "yours" or kind == "periodic" then
 				local en = englishSpell(spell) or spell
-				local summon = map[en] or map[spell]
-				if summon and (en == "Fireball" or en == "Firebolt") then
-					local classEn
-					if UnitClass then
-						local _
-						_, classEn = UnitClass("player")
-					end
-					if classEn == "WARLOCK" then
-						spell = summon
+				local claimed = nil
+				if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.HitOwner then
+					claimed = AZSSpellMeter_Ledger.HitOwner(en)
+				end
+				if claimed and claimed ~= "" and claimed ~= spell then
+					castKeep = spell
+					spell = claimed
+				elseif not (AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.SpellActors and AZSSpellMeter_Ledger.SpellActors[en]) then
+					local map = AZSSpellMeter_MinionAbility
+					if map and (kind == "yours" or kind == "periodic") then
+						local summon = map[en] or map[spell]
+						if summon and (en == "Fireball" or en == "Firebolt") then
+							local classEn
+							if UnitClass then
+								local _
+								_, classEn = UnitClass("player")
+							end
+							if classEn == "WARLOCK" then
+								castKeep = spell
+								spell = summon
+							end
+						end
 					end
 				end
 			end
 			note(spell, amount, crit, victim)
+			local side = castKeep or castName
+			if side and side ~= "" and side ~= spell and victim then
+				local keepBlow = lastBlow[victim]
+				note(spell .. "\031" .. side, amount, crit, victim)
+				lastBlow[victim] = keepBlow
+			end
 		end
 	end
 
@@ -697,6 +719,7 @@ local function note(spell, amount, crit, victim)
 	end
 	row.kills = (row.kills or 0) + 1
 	state.kills = (state.kills or 0) + 1
+	AZSSpellMeter_SpellRev = (AZSSpellMeter_SpellRev or 0) + 1
 	local bossRow = AZSSpellMeter_BossSpellRow(spell)
 	if bossRow then
 		bossRow.kills = (bossRow.kills or 0) + 1
@@ -705,11 +728,40 @@ local function note(spell, amount, crit, victim)
 end
 
 -- Global: keeps the main chunk under Lua 5.0's local limit.
+function AZSSpellMeter_TouchBoss()
+	if not state or not AZSSpellMeter_Ledger or not AZSSpellMeter_Ledger.Context then
+		return
+	end
+	local ctx = AZSSpellMeter_Ledger.Context()
+	if not ctx then
+		return
+	end
+	local enc = ctx.encounter
+	local id = nil
+	if enc then
+		id = enc.encounterId or enc.id or "up"
+	end
+	if id and enc.state ~= "completed" then
+		if state.bossEnc ~= id then
+			state.bossSpells = {}
+			state.bossBest = nil
+			state.bossEnc = id
+		end
+		state.bossFight = true
+	else
+		state.bossFight = nil
+	end
+end
+
 function syncBossFight(gameTotal)
 	if not state then
 		return
 	end
 	gameTotal = tonumber(gameTotal) or 0
+	if state.bossEnc then
+		state.bossSeenTotal = gameTotal
+		return
+	end
 	local prev = state.bossSeenTotal or 0
 	if prev > 0 and gameTotal < prev * 0.5 then
 		state.bossSpells = {}
@@ -830,6 +882,36 @@ local function clearRecentRate(mode)
 	rateHist[mode] = nil
 end
 
+-- A co-op hitch often moves the run clock by a few seconds. That is not a new run.
+function AZSSpellMeter_ClockJumped(mode, now)
+	local hist = rateHist[mode]
+	if not hist or not now then
+		return false
+	end
+	local n = table.getn(hist)
+	if n < 1 or not hist[n] then
+		return false
+	end
+	local dt = now - (hist[n].t or 0)
+	if dt < -0.05 or dt > 2 then
+		AZSSpellMeter_LagHold = GetTime and GetTime() or 0
+		return true
+	end
+	return false
+end
+
+function AZSSpellMeter_Lagging()
+	local at = AZSSpellMeter_LagHold or 0
+	if at <= 0 then
+		return false
+	end
+	local wall = GetTime and GetTime() or 0
+	if wall > 0 and (wall - at) < 4 then
+		return true
+	end
+	return false
+end
+
 -- Seconds of run time DPS looks back. Nil in saved settings means 30.
 -- dpsAll uses the meter's own average instead, which is the whole run,
 -- or the time since Reset on a view that was reset.
@@ -874,25 +956,34 @@ local function recentRate(mode, now, total, bucket)
 	end
 	-- "Again" after death often resets the built-in meter without rewinding the
 	-- run clock. Old samples then sit above the new total and force DPS to 0.
+	-- A hitch can do the same for one reading, or rewind the clock a few seconds.
+	-- Keep the trail in that case. Slide it onto the corrected clock.
+	local jumped = AZSSpellMeter_ClockJumped(mode, now)
 	if last and (last.total or 0) > 0 and total + 1 < (last.total or 0) * 0.5 then
+		if jumped or AZSSpellMeter_Lagging() then
+			if (now + 0.05) < (last.t or 0) then
+				local gap = (last.t or 0) - now
+				local si
+				for si = 1, n do
+					hist[si].t = (hist[si].t or 0) - gap
+				end
+			end
+			return nil
+		end
 		hist = {}
 		rateHist[mode] = hist
 		n = 0
 		last = nil
 	end
-	-- A small clock stutter (level-up cards) should not wipe the graph. A real
-	-- rewind leaves old samples in the future; keeping them makes DPS stay at 0
-	-- until the new clock catches up, so drop the trail and start again.
 	local clockBack = last and ((now + 0.05) < (last.t or 0))
 	if clockBack then
 		local gap = (last.t or 0) - now
-		if gap > 2 then
-			hist = {}
-			rateHist[mode] = hist
-			n = 0
-			last = nil
-			clockBack = false
+		local si
+		for si = 1, n do
+			hist[si].t = (hist[si].t or 0) - gap
 		end
+		last = hist[n]
+		clockBack = false
 	end
 	-- Keep the whole run for the graph. Thin older samples when the list grows large.
 	-- Also sample when the total moves, even if the run clock is briefly stuck —
@@ -1173,6 +1264,9 @@ local PROC_CAST = {
 	["Hallowed Ground"] = { "Consecration" },
 	["Divine Intervention"] = { "Consecration" },
 	["The Art of War"] = { "Exorcism" },
+	["Presence of Mind"] = { "Arcane Missiles" },
+	["Seal of Command"] = { "Judgement" },
+	["Divine Storm"] = { "Exorcism" },
 	["Frenzy"] = { "Multi-Shot" },
 	["Rapid Fire"] = { "Aimed Shot" },
 	["Counterattack"] = { "Explosive Trap" },
@@ -1187,7 +1281,7 @@ local PROC_CAST = {
 	["Nightfall"] = { "Shadow Bolt" },
 	["Shadow Cleave"] = { "Shadow Bolt" },
 	-- Conflagrate is its own meter row (Immolate explosions). Do not fold it.
-	-- Splitting Ice is its own meter row (Frostbolt splinters). Do not fold it.
+	["Splitting Ice"] = { "Frostbolt" },
 	["Omen of Clarity"] = { "Starfire" },
 	["Starfall"] = { "Starfire" },
 	["Leader of the Pack"] = { "Swipe" },
@@ -1776,6 +1870,16 @@ AZSSpellMeter_MinionShared = {
 	["Dread Lord"] = "Searing Pain",
 	["Doomguard"] = "Shadow Bolt",
 }
+-- Death Coil is the succubus until the hero has that skill selected.
+AZSSpellMeter_MinionSkill = {
+	["Death Coil"] = "Succubus",
+}
+-- These stay on the spell that casts them even when the ledger does not mark them as procs.
+AZSSpellMeter_KnownCast = {
+	["Presence of Mind"] = "Arcane Missiles",
+	["Seal of Command"] = "Judgement",
+	["Divine Storm"] = "Exorcism",
+}
 function AZSSpellMeter_PlayerHasSpell(name)
 	if not name or name == "" then
 		return false
@@ -1885,6 +1989,65 @@ function AZSSpellMeter_HitNote(name)
 	return "Hits, crits, and kills are counted on " .. clientSpell(spell) .. "."
 end
 
+function AZSSpellMeter_ClearHide(win)
+	if win then
+		win.hideRows = nil
+	end
+	if config().look then
+		config().look.hide = nil
+	end
+end
+
+function AZSSpellMeter_ClearAllHide()
+	AZSSpellMeter_ClearHide(frame)
+	if popped then
+		local mode, win
+		for mode, win in pairs(popped) do
+			if win then
+				win.hideRows = nil
+			end
+		end
+	end
+	if config().look then
+		config().look.hide = nil
+	end
+end
+
+function AZSSpellMeter_RowHidden(name)
+	local win = AZSSpellMeter_Focus
+	local hide = win and win.hideRows
+	if not hide or not name then
+		return false
+	end
+	if hide[name] then
+		return true
+	end
+	local en = englishSpell(name)
+	if en and hide[en] then
+		return true
+	end
+	return false
+end
+
+function AZSSpellMeter_ToggleHide(win, name)
+	if not win or not name or name == "" then
+		return
+	end
+	if not win.hideRows then
+		win.hideRows = {}
+	end
+	local key = englishSpell(name) or name
+	if win.hideRows[key] then
+		win.hideRows[key] = nil
+	else
+		win.hideRows[key] = true
+		say("Hidden " .. clientSpell(key) .. ". The total still includes it. It comes back when you change tabs, switch Received and Done, close and reopen an extra window, or the run resets.")
+	end
+	if config().look then
+		config().look.hide = nil
+	end
+end
+
 -- Custom talents are not in Spell.dbc, so the generated icon list has no row for them.
 local EXTRA_ICONS = {
 	["Hot Streak"] = "Spell_Fire_Fireball02",
@@ -1951,6 +2114,7 @@ local EXTRA_ICONS = {
 	["Gold-sniffer"] = "INV_Misc_Coin_01",
 	["Hallowed Ground"] = "Spell_Holy_SealOfProtection",
 	["Hammer of the Righteous"] = "Spell_Holy_BlessingOfProtection",
+	["Righteous Hammer"] = "Ability_ThunderBolt",
 	["Heart of the Earthshaker"] = "INV_Jewelry_Necklace_AhnQiraj_02",
 	["Heavy Dark Iron Ring"] = "INV_Jewelry_Ring_14",
 	["Heavy Shield"] = "INV_Shield_05",
@@ -2112,6 +2276,18 @@ local function iconFor(name)
 		end
 	end
 	return QUESTION
+end
+
+function AZSSpellMeter_ProcTex(tex, name)
+	if tex and tex ~= "" then
+		tex = asTexture(tex) or tex
+	else
+		tex = nil
+	end
+	if not tex or tex == "" or string.find(string.lower(tex), "questionmark", 1, true) then
+		tex = iconFor(name)
+	end
+	return tex
 end
 
 local function rowIcon(data)
@@ -2684,9 +2860,9 @@ local function watchRun()
 		end
 		return
 	end
-	-- A real new run starts near zero. A mid-run dip (cards, pause) must not
-	-- wipe the meter or the DPS graph.
-	if runSeen and t + 1 < runSeen and t < 8 and ((state.kills or 0) > 0 or state.base or state.healBase or state.bossBase or state.takenBase or state.partyBase) then
+	-- A real new run starts near zero. A few seconds of lag can rewind the
+	-- clock without starting over, so that must not wipe the meter or the graph.
+	if runSeen and t + 1 < runSeen and t < 2 and ((state.kills or 0) > 0 or state.base or state.healBase or state.bossBase or state.takenBase or state.partyBase) then
 		state.spells = {}
 		state.kills = 0
 		state.best = nil
@@ -2722,6 +2898,9 @@ local function watchRun()
 			graph.graphLive = false
 		end
 		say("New run.")
+		if AZSSpellMeter_ClearAllHide then
+			AZSSpellMeter_ClearAllHide()
+		end
 	end
 	runSeen = t
 end
@@ -2763,6 +2942,12 @@ local function meterFrom(list)
 end
 
 local function inParty()
+	if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.InParty then
+		local on = AZSSpellMeter_Ledger.InParty()
+		if on ~= nil then
+			return on
+		end
+	end
 	local rev = AZS_REVIVE
 	if rev and rev.down ~= nil then
 		return true
@@ -2833,7 +3018,7 @@ local function meterWords(mode)
 	if not mode then
 		mode = viewMode()
 	end
-	if mode == "healing" then
+	if mode == "healing" or mode == "partyHeal" then
 		return "Healing", "HPS", false
 	elseif mode == "taken" then
 		return "Taken", "DPS", false
@@ -2859,12 +3044,49 @@ local function baseFields(mode)
 	return "base", "baseTotal", "baseTime"
 end
 
+function AZSSpellMeter_PartyGraphHost()
+	if popped and popped.party and popped.party:IsShown() then
+		return popped.party
+	end
+	if frame and viewMode() == "party" then
+		return frame
+	end
+	return nil
+end
+
+function AZSSpellMeter_PartyListHeal(win)
+	if not win or win.partyOwner or win.partyList ~= "healing" then
+		return false
+	end
+	local mode = win.fixed
+	if not mode then
+		mode = viewMode()
+	end
+	return mode == "party"
+end
+
+function AZSSpellMeter_PartyFields(mode, win)
+	if AZSSpellMeter_PartyListHeal(win) then
+		return "partyHealBase", "partyHealBaseTotal", "partyHealBaseTime"
+	end
+	return baseFields(mode)
+end
+
 local function pullMeter(mode)
 	if not mode then
 		mode = viewMode()
 	end
 	if mode == "damage" and testMeter then
 		return meterFrom(testMeter)
+	end
+	if mode ~= "taken" and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.Pull then
+		local healDone = config().look and config().look.healDone
+		local flat = config().look and config().look.flat
+		-- Window 0 skips the game's per-spell history walk. The 30s rate is the local trail.
+		local ledLines, ledTotal, ledDps = AZSSpellMeter_Ledger.Pull(mode, AZSSpellMeter_Focus, 0, healDone, flat)
+		if ledLines then
+			return ledLines, ledTotal, ledDps
+		end
 	end
 	local fn = AZS_GetMeter
 	if mode == "healing" then
@@ -2921,15 +3143,27 @@ local function captureBase(mode)
 		for i = 1, table.getn(lines) do
 			local line = lines[i]
 			local name = line.name
+			if line.baseKey then
+				name = line.baseKey
+			end
 			if name and name ~= "" then
 				base[name] = (base[name] or 0) + (tonumber(line.dmg) or 0)
 			end
 		end
 	end
-	local bKey, tKey, timeKey = baseFields(mode)
-	state[bKey] = base
-	state[tKey] = tonumber(total) or 0
-	state[timeKey] = runNow()
+	local bKey, tKey, timeKey = AZSSpellMeter_PartyFields(mode, AZSSpellMeter_Focus)
+	local focus = AZSSpellMeter_Focus
+	local drillPrefix = nil
+	if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.NoteReset then
+		drillPrefix = AZSSpellMeter_Ledger.NoteReset(state, mode, focus, total, runNow(), config().look and config().look.healDone)
+	end
+	if drillPrefix and AZSSpellMeter_Ledger.MergeDrill then
+		state[bKey] = AZSSpellMeter_Ledger.MergeDrill(state[bKey] or {}, drillPrefix, base)
+	else
+		state[bKey] = base
+		state[tKey] = tonumber(total) or 0
+		state[timeKey] = runNow()
+	end
 end
 
 local function windowReset(dropTest, mode)
@@ -2942,14 +3176,17 @@ local function windowReset(dropTest, mode)
 	if dropTest then
 		testMeter = nil
 	end
+	local drilledReset = mode == "party" and AZSSpellMeter_Focus and AZSSpellMeter_Focus.partyOwner
 	captureBase(mode)
-	clearRecentRate(mode)
-	-- Zero sample at the reset moment so the DPS window measures from here,
-	-- not from a blank history that waits on the next combat tick.
-	local hist = {}
-	rateHist[mode] = hist
-	hist[1] = { t = runNow(), total = 0, spells = {} }
-	clearColHold(mode)
+	if not drilledReset then
+		clearRecentRate(mode)
+		-- Zero sample at the reset moment so the DPS window measures from here,
+		-- not from a blank history that waits on the next combat tick.
+		local hist = {}
+		rateHist[mode] = hist
+		hist[1] = { t = runNow(), total = 0, spells = {} }
+		clearColHold(mode)
+	end
 	if showsKills(mode) then
 		state.spells = {}
 		state.kills = 0
@@ -2960,6 +3197,9 @@ local function windowReset(dropTest, mode)
 	end
 	if popped[mode] then
 		popped[mode].scrollPos = 0
+	end
+	if AZSSpellMeter_Focus and (not AZSSpellMeter_Focus.fixed or AZSSpellMeter_Focus.fixed == mode) then
+		AZSSpellMeter_ClearHide(AZSSpellMeter_Focus)
 	end
 end
 
@@ -3066,16 +3306,24 @@ local function rebuild(mode)
 	if mode == "boss" then
 		syncBossFight(gameTotal)
 	end
-	local bKey, tKey, timeKey = baseFields(mode)
+	AZSSpellMeter_ClockJumped(mode, runNow())
+	local bKey, tKey, timeKey = AZSSpellMeter_PartyFields(mode, AZSSpellMeter_Focus)
 	local baseMap = state[bKey]
-	if baseMap and gameTotal + 1 < (state[tKey] or 0) then
+	if baseMap and gameTotal + 1 < (state[tKey] or 0) and not (mode == "party" and AZSSpellMeter_Focus and AZSSpellMeter_Focus.partyOwner) then
 		local was = state[tKey] or 0
 		state[bKey] = nil
 		state[tKey] = nil
 		state[timeKey] = nil
+		if mode == "party" then
+			state.partyDrill = nil
+		end
 		baseMap = nil
 		-- A big drop is "Again" / a new attempt. A tiny dip is a level-up card.
-		if was > 0 and gameTotal < was * 0.5 then
+		-- A hitch can also flash an empty total. Leave the graph up while the clock is off.
+		if was > 0 and gameTotal < was * 0.5 and not AZSSpellMeter_Lagging() then
+			if AZSSpellMeter_ClearAllHide then
+				AZSSpellMeter_ClearAllHide()
+			end
 			clearRecentRate(mode)
 		end
 	end
@@ -3103,6 +3351,33 @@ local function rebuild(mode)
 		local gameRate = tonumber(rdps) or 0
 		if gameRate > meterDps then
 			meterDps = gameRate
+		end
+	end
+	if mode == "party" and AZSSpellMeter_Focus and AZSSpellMeter_Focus.partyOwner and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.DrillTotal then
+		local drillInfo = AZSSpellMeter_Ledger.DrillTotal(state, AZSSpellMeter_Focus, config().look and config().look.healDone)
+		if drillInfo then
+			if lines then
+				lines.holdRate = true
+			end
+			since = runNow() - (drillInfo.time or 0)
+			if since < 1 then
+				since = 1
+			end
+			meterTotal = gameTotal - (drillInfo.total or 0)
+			if meterTotal < 0 then
+				meterTotal = 0
+			end
+			meterDps = meterTotal / since
+		else
+			meterTotal = gameTotal
+			since = runNow()
+			if since < 1 then
+				since = 1
+			end
+			meterDps = meterTotal / since
+			if (tonumber(rdps) or 0) > meterDps then
+				meterDps = tonumber(rdps) or 0
+			end
 		end
 	end
 	local bucket = {}
@@ -3182,6 +3457,9 @@ local function rebuild(mode)
 			local line = lines[i]
 			local meterName = line.name
 			local name = meterName
+			if line.baseKey then
+				meterName = line.baseKey
+			end
 			local summonIcon = nil
 			if meterName == "Pets" then
 				local summoned, simg, several = oneSummon()
@@ -3240,12 +3518,21 @@ local function rebuild(mode)
 				if row.iconPath then
 					keepIcon(name, row.iconPath)
 				end
+				if line.fromLedger and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ApplyCombat then
+					if mode == "boss" then
+						AZSSpellMeter_Ledger.ApplyCombat(row, line, state.bossSpells or {}, englishSpell)
+					else
+						AZSSpellMeter_Ledger.ApplyCombat(row, line, state.spells, englishSpell)
+					end
+				end
 			end
 		end
 	end
 	-- Minion hits logged as "Your Fireball" / "Your Hellfire" land on the spell
 	-- name; meter damage is on Imp / Infernal. Fold empty spell rows onto the
-	-- summon when that summon is present.
+	-- summon when that summon is present. The ledger already split actors, so
+	-- this guess only runs for the old meter.
+	if not (lines and lines.fromLedger) then
 	do
 		local map = AZSSpellMeter_MinionAbility
 		if map and state and state.spells then
@@ -3383,7 +3670,8 @@ local function rebuild(mode)
 			end
 		end
 	end
-	if showsKills(mode) then
+	end
+	if showsKills(mode) and not (lines and lines.fromLedger) then
 		local iconOwners = {}
 		local function iconKey(path)
 			if not path or path == "" then
@@ -3436,20 +3724,69 @@ local function rebuild(mode)
 			end
 		end
 	end
-	local windowRate = recentRate(mode, runNow(), meterTotal, bucket)
+	local windowRate = nil
+	if not (mode == "party" and AZSSpellMeter_Focus and AZSSpellMeter_Focus.partyOwner) then
+		local rateMode = mode
+		if AZSSpellMeter_PartyListHeal(AZSSpellMeter_Focus) then
+			rateMode = "partyHeal"
+		end
+		windowRate = recentRate(rateMode, runNow(), meterTotal, bucket)
+	end
 	-- 0 is a valid idle reading once the trail has a real baseline. Nil means
 	-- the window is not ready; keep the total/time average already set above.
-	if windowRate ~= nil then
+	-- A ready ledger rate is the server's own window. After Reset the saved
+	-- baseline still uses the local trail, because that rate includes the
+	-- numbers from before the reset.
+	if lines and lines.rateReady and not lines.holdRate and not (baseMap and not (mode == "party" and AZSSpellMeter_Focus and AZSSpellMeter_Focus.partyOwner)) then
+		meterDps = tonumber(rdps) or 0
+		if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.RestoreRates then
+			AZSSpellMeter_Ledger.RestoreRates(bucket)
+		end
+	elseif windowRate ~= nil then
 		meterDps = windowRate
+	end
+	if lines and lines.pendingProcs and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.FoldProcs then
+		if not (config().look and config().look.flat) then
+			AZSSpellMeter_Ledger.FoldProcs(bucket, lines.pendingProcs, englishSpell, bucketOf, PROC_CAST, state.spells)
+		else
+			local pi
+			for pi = 1, table.getn(lines.pendingProcs) do
+				local spell = lines.pendingProcs[pi]
+				if spell and spell.name and spell.name ~= "" then
+					local row = bucketOf(spell.name)
+					row.damage = (row.damage or 0) + (spell.dmg or 0)
+					row.dps = (row.dps or 0) + (spell.dps or 0)
+					row.fromMeter = true
+					if spell.icon and not row.iconPath then
+						row.iconPath = spell.icon
+					end
+				end
+			end
+		end
+	end
+	local filledName, filledRow
+	for filledName, filledRow in pairs(bucket) do
+		if filledRow.procs then
+			local fi = 1
+			while filledRow.procs[fi] do
+				local proc = filledRow.procs[fi]
+				if proc and (not proc.icon or proc.icon == "") then
+					proc.icon = iconFor(proc.name)
+				end
+				fi = fi + 1
+			end
+		end
 	end
 	-- Fold a proc into the spell it actually casts: one Pyroblast row, and Hot
 	-- Streak lives on the proc button. Several casts share the proc. Collect
 	-- first; pairs cannot drop keys. "Each spell alone" leaves the meter's own rows.
+	-- The ledger does not mark every proc, so this list still runs for its rows.
 	local merges = {}
 	local procName, row
+	local partyRoster = mode == "party" and not (AZSSpellMeter_Focus and AZSSpellMeter_Focus.partyOwner)
 	if not (config().look and config().look.flat) then
 	for procName, row in pairs(bucket) do
-		if mode ~= "party" and ((PROC_CAST[englishSpell(procName)] and not PROC_CAST[englishSpell(procName)].onlyProc) or row.proc or string.find(procName, ": ", 1, true)) then
+		if not partyRoster and ((PROC_CAST[englishSpell(procName)] and not PROC_CAST[englishSpell(procName)].onlyProc) or row.proc or string.find(procName, ": ", 1, true)) then
 			local parents = anchorSpells(procName, bucket)
 			if parents and not (table.getn(parents) == 1 and parents[1] == procName) then
 				local mi = table.getn(merges) + 1
@@ -3501,26 +3838,40 @@ local function rebuild(mode)
 					-- The same talent can arrive under two languages. Keep one button.
 					local enProc = englishSpell(link.proc)
 					local have = nil
-					local ei
-					for ei = 1, table.getn(parent.procs) do
+					local ei = 1
+					while parent.procs[ei] do
 						if englishSpell(parent.procs[ei].name) == enProc then
 							have = parent.procs[ei]
 						end
+						ei = ei + 1
+					end
+					local procIcon = row.iconPath
+					if not procIcon or procIcon == "" then
+						procIcon = iconFor(link.proc)
 					end
 					if have then
 						have.damage = (have.damage or 0) + partDmg
 						have.dps = (have.dps or 0) + partRate
 						have.hits = (have.hits or 0) + phits
 						have.crits = (have.crits or 0) + pcrits
-					else
-						parent.procs[table.getn(parent.procs) + 1] = {
+						have.proc = true
+						if not have.icon or have.icon == "" then
+							have.icon = procIcon
+						end
+					elseif enProc ~= englishSpell(parents[pi]) then
+						local slot = 1
+						while parent.procs[slot] do
+							slot = slot + 1
+						end
+						parent.procs[slot] = {
 							name = link.proc,
 							damage = partDmg,
 							dps = partRate,
 							kills = 0,
 							hits = phits,
 							crits = pcrits,
-							icon = row.iconPath,
+							icon = procIcon,
+							proc = true,
 						}
 					end
 				end
@@ -3528,6 +3879,19 @@ local function rebuild(mode)
 			bucket[link.proc] = nil
 		end
 	end
+	end
+	if lines and lines.fromLedger and not (mode == "party" and AZSSpellMeter_Focus and AZSSpellMeter_Focus.partyOwner) and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.FoldUnselected then
+		AZSSpellMeter_Ledger.FoldUnselected(bucket, englishSpell, config().look and config().look.flat)
+	end
+	if lines and lines.fromLedger and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.FoldKnown then
+		AZSSpellMeter_Ledger.FoldKnown(bucket, englishSpell, config().look and config().look.flat)
+	end
+	if lines and lines.fromLedger and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.FoldShared then
+		if mode == "boss" then
+			AZSSpellMeter_Ledger.FoldShared(bucket, state.bossSpells or {}, englishSpell, AZSSpellMeter_MinionShared)
+		else
+			AZSSpellMeter_Ledger.FoldShared(bucket, state.spells, englishSpell, AZSSpellMeter_MinionShared)
+		end
 	end
 	local summonKey = {
 		["Imp"] = true,
@@ -3567,10 +3931,10 @@ local function rebuild(mode)
 		-- Being out is not a contribution. Healing, Boss, and Taken stay empty
 		-- until that summon added to the number this view tracks.
 		local contributed = (summonRow.damage or 0) > 0 or (showsKills(mode) and (summonRow.kills or 0) > 0)
-		if contributed and (summonKey[summonEn] or summonKey[summonName]) then
+		if contributed and (summonKey[summonEn] or summonKey[summonName] or summonRow.actorPack) then
 			memberCount = memberCount + 1
 			members[memberCount] = summonName
-			if warlockSummon[summonEn] or warlockSummon[summonName] then
+			if summonRow.actorPack == "minion" or warlockSummon[summonEn] or warlockSummon[summonName] then
 				anyWarlock = true
 			end
 		end
@@ -3614,10 +3978,45 @@ local function rebuild(mode)
 					hits = member.hits or 0,
 					crits = member.crits or 0,
 					best = member.best or 0,
-					icon = member.iconPath,
+					icon = iconFor(memberName),
 					summon = true,
+					countLabel = AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.CountLabel and AZSSpellMeter_Ledger.CountLabel(memberName) or nil,
 				}
 				bucket[memberName] = nil
+			end
+		end
+	end
+	local countName, countRow
+	for countName, countRow in pairs(bucket) do
+		local countEn = englishSpell(countName)
+		local separate = countName ~= "Minions" and countName ~= "Pets" and (countRow.actorPack or summonKey[countName] or summonKey[countEn])
+		if separate and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.CountLabel then
+			countRow.outLabel = AZSSpellMeter_Ledger.CountLabel(countName)
+		else
+			countRow.outLabel = nil
+		end
+	end
+	-- An icon is a different spell grouped into the row. The row's own spell is not an icon.
+	local stripName, stripRow
+	for stripName, stripRow in pairs(bucket) do
+		if stripRow.procs and stripRow.procs[1] then
+			local kept = {}
+			local si = 1
+			while stripRow.procs[si] do
+				local p = stripRow.procs[si]
+				local same = false
+				if p and not p.summon and p.name and (p.name == stripName or englishSpell(p.name) == englishSpell(stripName)) then
+					same = true
+				end
+				if p and not same then
+					kept[table.getn(kept) + 1] = p
+				end
+				si = si + 1
+			end
+			if kept[1] then
+				stripRow.procs = kept
+			else
+				stripRow.procs = nil
 			end
 		end
 	end
@@ -3638,6 +4037,9 @@ local function rebuild(mode)
 		end
 		if not keep and entry.procs and table.getn(entry.procs) > 0 then
 			keep = true
+		end
+		if keep and not entry.heroRow and not entry.child and AZSSpellMeter_RowHidden and AZSSpellMeter_RowHidden(name) then
+			keep = false
 		end
 		if keep then
 			-- A proc is the spell it casts. Its kills belong to that spell, so a
@@ -3731,6 +4133,7 @@ local function rebuild(mode)
 						bn = bn + 1
 						built[bn] = {
 							name = p.name,
+							outLabel = p.countLabel,
 							damage = p.damage or 0,
 							dps = p.dps or 0,
 							kills = p.kills or 0,
@@ -3852,6 +4255,16 @@ local function refreshWindow(win)
 	if not win or not state then
 		return
 	end
+	AZSSpellMeter_Focus = win
+	local modeNow = win.fixed or viewMode()
+	if modeNow == "party" and win.partyOwner and not inParty() then
+		win.partyOwner = nil
+		win.partyOwnerName = nil
+		win.partyView = nil
+	end
+	if AZSSpellMeter_LedgerChrome then
+		AZSSpellMeter_LedgerChrome(win, modeNow)
+	end
 	local headH = win.headH or K.HEADER
 	local listRows = win.rows or rows
 	local pos = scroll
@@ -3919,9 +4332,16 @@ local function refreshWindow(win)
 	end
 
 	local mode = win.fixed or viewMode()
-	local tint = HEADER_TINT[mode] or HEADER_TINT.damage
+	local tintMode = mode
+	if AZSSpellMeter_PartyListHeal(win) then
+		tintMode = "healing"
+	end
+	local tint = HEADER_TINT[tintMode] or HEADER_TINT.damage
 	local numR, numG, numB = tone(tint[4], tint[5], tint[6])
 	local amountWord, rateWord, killView = meterWords(win.fixed)
+	if AZSSpellMeter_PartyListHeal(win) then
+		amountWord, rateWord, killView = "Healing", "HPS", false
+	end
 	local board = meterTotal
 	local dps = meterDps
 	if win.emptyText then
@@ -3946,7 +4366,17 @@ local function refreshWindow(win)
 					empty = "Damage taken needs a newer game build."
 				end
 			elseif mode == "party" then
-				if AZS_GetPartyMeter then
+				if not win.partyOwner and win.partyList == "healing" then
+					empty = "No healing yet."
+				elseif win.partyOwner then
+					if win.partyView == "healing" then
+						empty = "No healing yet."
+					elseif win.partyView == "boss" then
+						empty = "No boss damage yet."
+					else
+						empty = "No damage yet."
+					end
+				elseif AZS_GetPartyMeter or (AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.Ready and AZSSpellMeter_Ledger.Ready()) then
 					empty = "No party damage yet."
 				else
 					empty = "Party damage needs a newer game build."
@@ -3984,6 +4414,9 @@ local function refreshWindow(win)
 			title = "Party"
 		elseif className ~= "" then
 			title = className
+		end
+		if mode == "party" and win.partyOwnerName and win.partyOwnerName ~= "" then
+			title = win.partyOwnerName
 		end
 		win.brandText:SetText(title)
 		win.brandText:SetTextColor(1, 0.9, 0.62)
@@ -4049,7 +4482,11 @@ local function refreshWindow(win)
 	if win == frame then
 		graphSlot(mode)
 		if isMainGraphOpen() then
-			paintDpsGraph(win, rateHist[mode], true, mode, "main")
+			local graphMode = mode
+			if mode == "party" and win.partyList == "healing" then
+				graphMode = "partyHeal"
+			end
+			paintDpsGraph(win, rateHist[graphMode], true, graphMode, "main")
 		elseif graphBoxes.main then
 			paintDpsGraph(win, rateHist[mode], false, mode, "main")
 		end
@@ -4058,7 +4495,16 @@ local function refreshWindow(win)
 		for gi = 1, table.getn(graphModes) do
 			local gm = graphModes[gi]
 			if isGraphOpen(gm) then
-				paintDpsGraph(win, rateHist[gm], true, gm)
+				local histMode = gm
+				local graphLink = nil
+				if gm == "party" then
+					local host = AZSSpellMeter_PartyGraphHost()
+					if host and host.partyList == "healing" then
+						histMode = "partyHeal"
+						graphLink = "party"
+					end
+				end
+				paintDpsGraph(win, rateHist[histMode], true, histMode, graphLink)
 			elseif graphBoxes[gm] then
 				paintDpsGraph(win, rateHist[gm], false, gm)
 			end
@@ -4382,6 +4828,12 @@ local function refreshWindow(win)
 		local nproc = 0
 		if entry.procs then
 			nproc = table.getn(entry.procs)
+			if nproc < 1 and entry.procs[1] then
+				nproc = 1
+				while entry.procs[nproc + 1] do
+					nproc = nproc + 1
+				end
+			end
 		end
 		if nproc > K.TRAIL then
 			nproc = K.TRAIL
@@ -4402,7 +4854,7 @@ local function refreshWindow(win)
 			if entry.child or (detail and entry.procs and entry.procs[1]) then
 				nameLeft = 28
 			end
-			local text = entry.name or ""
+			local text = entry.outLabel or entry.name or ""
 			local fs = listRows[1].name
 			local rankGap = 0
 			if not entry.child then
@@ -4520,7 +4972,7 @@ local function refreshWindow(win)
 			if board > 0 then
 				share = dealt / board
 			end
-			local label = data.name
+			local label = data.outLabel or data.name
 			row.data = data
 			row:Show()
 			local rowH = rowHeights[first + i] or K.ROW_H
@@ -4538,8 +4990,12 @@ local function refreshWindow(win)
 				row.icon:SetTexture(K.CLASS_SHEET)
 				row.icon:SetTexCoord(classCoord[1], classCoord[2], classCoord[3], classCoord[4])
 			else
-				row.icon:SetTexture(rowIcon(data))
-				row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+				if data.portraitKey and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ApplyPortrait and AZSSpellMeter_Ledger.ApplyPortrait(row.icon, data.portraitKey) then
+					row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+				else
+					row.icon:SetTexture(rowIcon(data))
+					row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+				end
 			end
 			row.name:SetText(data.shown or label)
 			if data.shown then
@@ -4668,6 +5124,12 @@ local function refreshWindow(win)
 				end
 			elseif not detail and not data.child and procs then
 				local pn = table.getn(procs)
+				if pn < 1 and procs[1] then
+					pn = 1
+					while procs[pn + 1] do
+						pn = pn + 1
+					end
+				end
 				if pn > K.TRAIL then
 					pn = K.TRAIL
 				end
@@ -4801,12 +5263,14 @@ local function refreshWindow(win)
 				btn.info = info
 				btn.stack = stack
 				btn.win = win
+				btn:SetFrameLevel((row:GetFrameLevel() or 1) + 5)
 				if btn.icon then
-					local tex = info and info.icon
-					if (not tex or tex == "") and info then
-						tex = iconFor(info.name)
+					local tex = nil
+					if info then
+						tex = AZSSpellMeter_ProcTex(info.icon or info.iconPath, info.name)
 					end
-					if tex then
+					local painted = info and info.portraitKey and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ApplyPortrait and AZSSpellMeter_Ledger.ApplyPortrait(btn.icon, info.portraitKey)
+					if not painted and tex then
 						btn.icon:SetTexture(tex)
 					end
 				end
@@ -4944,63 +5408,158 @@ function sampleAllRates()
 	if not state then
 		return
 	end
+	AZSSpellMeter_Focus = nil
 	local now = runNow()
+	local nowWall = 0
+	if GetTime then
+		nowWall = GetTime()
+	end
+	local stamp = nil
+	if AZSSpellMeter_Ledger then
+		stamp = AZSSpellMeter_Ledger.SampleAt
+		if not stamp then
+			stamp = {}
+			AZSSpellMeter_Ledger.SampleAt = stamp
+		end
+	end
+	local live = viewMode()
 	local modes = { "damage", "healing", "boss", "taken", "party" }
 	local mi
 	for mi = 1, table.getn(modes) do
 		local mode = modes[mi]
-		local lines, total = pullMeter(mode)
-		local gameTotal = tonumber(total) or 0
-		if mode == "boss" then
-			syncBossFight(gameTotal)
+		-- The open tab and an open graph need a fresh sample. Anything else
+		-- once a second is enough for the line, and a full breakdown costs more
+		-- the longer the fight goes.
+		local hot = false
+		if frame and frame:IsShown() and mode == live then
+			hot = true
 		end
-		local bKey, tKey, timeKey = baseFields(mode)
-		local baseMap = state[bKey]
-		local meterTot = gameTotal
-		if baseMap then
-			if gameTotal + 1 < (state[tKey] or 0) then
-				local was = state[tKey] or 0
-				state[bKey] = nil
-				state[tKey] = nil
-				state[timeKey] = nil
-				baseMap = nil
-				if was > 0 and gameTotal < was * 0.5 then
-					clearRecentRate(mode)
-				end
+		if bubble and bubble:IsShown() and mode == live then
+			hot = true
+		end
+		local pop = popped[mode]
+		if pop and pop:IsShown() and mode == AZSSpellMeter_ExtraMode then
+			hot = true
+		end
+		if isGraphOpen(mode) or (isMainGraphOpen() and mode == live) then
+			hot = true
+		end
+		if not hot and stamp then
+			local prev = stamp[mode] or 0
+			if nowWall > 0 and (nowWall - prev) < 1 then
+				mode = nil
+			end
+		end
+		if stamp and mode then
+			stamp[mode] = nowWall
+		end
+		if mode then
+			if mode == "party" then
+				AZSSpellMeter_Focus = nil
+				AZSSpellMeter_StoreRate("party", "party", now)
+				AZSSpellMeter_Focus = { partyList = "healing", fixed = "party" }
+				AZSSpellMeter_StoreRate("party", "partyHeal", now)
+				AZSSpellMeter_Focus = nil
 			else
-				meterTot = gameTotal - (state[tKey] or 0)
-				if meterTot < 0 then
-					meterTot = 0
-				end
+				AZSSpellMeter_StoreRate(mode, mode, now)
 			end
 		end
-		local bucket = {}
-		if lines then
-			local i
-			for i = 1, table.getn(lines) do
-				local line = lines[i]
-				local name = line.name
-				if name and name ~= "" then
-					local raw = tonumber(line.dmg) or 0
-					local dealt = raw
-					if baseMap then
-						dealt = raw - (baseMap[name] or 0)
-						if dealt < 0 then
-							dealt = 0
-						end
-					end
-					bucket[name] = { damage = dealt }
-				end
-			end
-		end
-		recentRate(mode, now, meterTot, bucket)
 	end
+end
+
+function AZSSpellMeter_StoreRate(mode, rateMode, now)
+	local lines, total = pullMeter(mode)
+	local gameTotal = tonumber(total) or 0
+	if mode == "boss" then
+		syncBossFight(gameTotal)
+	end
+	AZSSpellMeter_ClockJumped(rateMode, now)
+	local bKey, tKey, timeKey = AZSSpellMeter_PartyFields(mode, AZSSpellMeter_Focus)
+	local baseMap = state[bKey]
+	local meterTot = gameTotal
+	if baseMap then
+		if gameTotal + 1 < (state[tKey] or 0) then
+			local was = state[tKey] or 0
+			state[bKey] = nil
+			state[tKey] = nil
+			state[timeKey] = nil
+			if rateMode == "party" then
+				state.partyDrill = nil
+			end
+			baseMap = nil
+			if was > 0 and gameTotal < was * 0.5 and not AZSSpellMeter_Lagging() then
+				clearRecentRate(rateMode)
+			end
+		else
+			meterTot = gameTotal - (state[tKey] or 0)
+			if meterTot < 0 then
+				meterTot = 0
+			end
+		end
+	end
+	local bucket = {}
+	if lines then
+		local i
+		for i = 1, table.getn(lines) do
+			local line = lines[i]
+			local name = line.name
+			local baseName = name
+			if line.baseKey then
+				baseName = line.baseKey
+			end
+			if name and name ~= "" then
+				local raw = tonumber(line.dmg) or 0
+				local dealt = raw
+				if baseMap then
+					dealt = raw - (baseMap[baseName] or 0)
+					if dealt < 0 then
+						dealt = 0
+					end
+				end
+				bucket[name] = { damage = dealt }
+			end
+		end
+	end
+	recentRate(rateMode, now, meterTot, bucket)
+end
+
+function AZSSpellMeter_PickExtra()
+	local list = AZSSpellMeter_ExtraQ
+	if not list then
+		list = {}
+		AZSSpellMeter_ExtraQ = list
+	end
+	local n = 0
+	local mode, pop
+	for mode, pop in pairs(popped) do
+		if pop:IsShown() then
+			n = n + 1
+			list[n] = mode
+		end
+	end
+	local i = n + 1
+	while list[i] do
+		list[i] = nil
+		i = i + 1
+	end
+	if n < 1 then
+		AZSSpellMeter_ExtraMode = nil
+		return
+	end
+	table.sort(list)
+	local turn = (AZSSpellMeter_ExtraTurn or 0) + 1
+	if turn > n then
+		turn = 1
+	end
+	AZSSpellMeter_ExtraTurn = turn
+	AZSSpellMeter_ExtraMode = list[turn]
 end
 
 local function refresh()
 	if not frame or not state then
 		return
 	end
+	AZSSpellMeter_PickExtra()
 	watchRun()
 	noteDeath()
 	-- Store every view's rate trail before painting, so opening the graph later
@@ -5022,8 +5581,9 @@ local function refresh()
 	end
 	local mode, pop
 	for mode, pop in pairs(popped) do
-		if pop:IsShown() then
+		if pop:IsShown() and (mode == AZSSpellMeter_ExtraMode or not pop.everPainted) then
 			refreshWindow(pop)
+			pop.everPainted = true
 		end
 	end
 end
@@ -5316,6 +5876,7 @@ function raiseOverCards(win)
 	pin(win.resetBtn)
 	pin(win.closeBtn)
 	pin(win.graphBtn)
+	pin(win.partySwap)
 	pin(win.popBtn)
 	pin(win.totalBtn)
 	pin(win.dpsBtn)
@@ -5361,6 +5922,9 @@ function raiseOverCards(win)
 	end
 	if win.graphBtn then
 		win.graphBtn:SetFrameLevel(head + 5)
+	end
+	if win.partySwap then
+		win.partySwap:SetFrameLevel(head + 6)
 	end
 	if win.popBtn then
 		win.popBtn:SetFrameLevel(head + 5)
@@ -5837,6 +6401,264 @@ local function roundBackdrop(edge)
 		edgeSize = e,
 		insets = { left = inset, right = inset, top = inset, bottom = inset },
 	}
+end
+
+function AZSSpellMeter_LedgerChrome(win, mode)
+	if not win then
+		return
+	end
+	local base = K.HEADER
+	if win ~= frame then
+		base = K.DETACH_H
+	end
+	local drilled = mode == "party" and win.partyOwner
+	local partyList = mode == "party" and not drilled
+	local heal = mode == "healing" or (drilled and win.partyView == "healing")
+	local two = drilled and heal
+	local chromeH = 0
+	if two then
+		chromeH = 32
+	elseif drilled or heal then
+		chromeH = 16
+	end
+	if chromeH > 0 then
+		win.headH = base + chromeH
+	else
+		win.headH = base
+	end
+	if win.emptyText then
+		win.emptyText:ClearAllPoints()
+		win.emptyText:SetPoint("TOPLEFT", win, "TOPLEFT", 12, -(win.headH + 6))
+	end
+	local bar = win.ledgerBar
+	if not bar then
+		bar = CreateFrame("Frame", nil, win)
+		bar:SetHeight(14)
+		bar:SetFrameLevel((win:GetFrameLevel() or 1) + 6)
+		win.ledgerBar = bar
+		bar.btns = {}
+		local labels = { "Back", "Damage", "Healing", "Boss", "Received", "Done" }
+		local keys = { "back", "damage", "healing", "boss", "received", "done" }
+		local widths = { 36, 52, 52, 40, 62, 40 }
+		local i
+		for i = 1, 6 do
+			local b = CreateFrame("Button", nil, bar)
+			b:SetHeight(14)
+			b:SetWidth(widths[i])
+			b:SetBackdrop(roundBackdrop(8))
+			b:SetBackdropColor(0.16, 0.1, 0.03, 0.85)
+			b:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+			local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			fs:SetPoint("CENTER", b, "CENTER", 0, 0.5)
+			fs:SetText(labels[i])
+			face(fs, 8)
+			b.label = fs
+			b.key = keys[i]
+			b:SetScript("OnClick", function()
+				local host = this:GetParent():GetParent()
+				local key = this.key
+				local look = config().look
+				if not look then
+					config().look = {}
+					look = config().look
+				end
+				if key == "back" then
+					host.partyOwner = nil
+					host.partyOwnerName = nil
+					host.partyView = nil
+					AZSSpellMeter_ClearHide(host)
+				elseif key == "damage" or key == "healing" or key == "boss" then
+					if host.partyOwner then
+						if host.partyView ~= key then
+							AZSSpellMeter_ClearHide(host)
+						end
+						host.partyView = key
+					end
+				elseif key == "received" or key == "done" then
+					local nextDone = key == "done"
+					if (look.healDone and true or false) ~= nextDone then
+						AZSSpellMeter_ClearHide(host)
+						if host ~= frame and config().view == "healing" then
+							AZSSpellMeter_ClearHide(frame)
+						end
+						if popped and popped.healing and host ~= popped.healing then
+							AZSSpellMeter_ClearHide(popped.healing)
+						end
+					end
+					if nextDone then
+						look.healDone = true
+					else
+						look.healDone = false
+					end
+				end
+				if host == frame then
+					scroll = 0
+				else
+					host.scrollPos = 0
+				end
+			end)
+			bar.btns[i] = b
+		end
+	end
+	if not drilled and not heal then
+		bar:Hide()
+		AZSSpellMeter_PartySwap(win, partyList)
+		return
+	end
+	bar:Show()
+	bar:SetHeight(chromeH - 2)
+	bar:ClearAllPoints()
+	bar:SetPoint("TOPLEFT", win, "TOPLEFT", 8, -(win.headH - K.COL_H - chromeH))
+	bar:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -(win.headH - K.COL_H - chromeH))
+	local look = config().look
+	local done = look and look.healDone
+	local xTop = 0
+	local xBot = 0
+	local i
+	for i = 1, 6 do
+		local b = bar.btns[i]
+		local key = b.key
+		local on = false
+		if key == "received" or key == "done" then
+			on = heal
+		elseif key == "damage" or key == "healing" then
+			on = drilled
+		else
+			on = drilled
+		end
+		if on then
+			b:Show()
+			b:ClearAllPoints()
+			if two and (key == "received" or key == "done") then
+				b:SetPoint("TOPLEFT", bar, "TOPLEFT", xBot, -16)
+				xBot = xBot + b:GetWidth() + 3
+			else
+				b:SetPoint("TOPLEFT", bar, "TOPLEFT", xTop, 0)
+				xTop = xTop + b:GetWidth() + 3
+			end
+			local active = false
+			if key == "damage" or key == "healing" or key == "boss" then
+				active = (win.partyView or "damage") == key
+			elseif key == "received" then
+				active = not done
+			elseif key == "done" then
+				active = done and true or false
+			end
+			if active then
+				b.label:SetTextColor(1, 0.86, 0.5)
+			else
+				b.label:SetTextColor(0.72, 0.66, 0.55)
+			end
+		else
+			b:Hide()
+		end
+	end
+	AZSSpellMeter_PartySwap(win, partyList)
+end
+
+function AZSSpellMeter_PartySwap(win, on)
+	if not win then
+		return
+	end
+	local swap = win.partySwap
+	if not on then
+		if swap then
+			swap:Hide()
+		end
+		if win.countText and win.cols then
+			win.countText:ClearAllPoints()
+			win.countText:SetPoint("LEFT", win.cols, "LEFT", 2, 0)
+		end
+		return
+	end
+	if not win.cols then
+		return
+	end
+	if not swap then
+		local swapName = "AZSSpellMeterPartySwap"
+		if win ~= frame then
+			swapName = "AZSSpellMeterDetPartySwap"
+		end
+		swap = CreateFrame("Button", swapName, win.cols)
+		swap:SetWidth(12)
+		swap:SetHeight(12)
+		swap:SetBackdrop(panelBackdrop())
+		swap:SetBackdropColor(0.16, 0.1, 0.03, 0.9)
+		swap:SetBackdropBorderColor(0.72, 0.5, 0.16, 1)
+		local icon = swap:CreateTexture(nil, "ARTWORK")
+		icon:SetPoint("TOPLEFT", swap, "TOPLEFT", 1, -1)
+		icon:SetPoint("BOTTOMRIGHT", swap, "BOTTOMRIGHT", -1, 1)
+		icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+		swap.icon = icon
+		swap:SetScript("OnClick", function()
+			local host = this:GetParent():GetParent()
+			if host.partyList == "healing" then
+				host.partyList = nil
+			else
+				host.partyList = "healing"
+			end
+			AZSSpellMeter_ClearHide(host)
+			if host == frame then
+				scroll = 0
+			else
+				host.scrollPos = 0
+			end
+		end)
+		swap:SetScript("OnEnter", function()
+			local host = this:GetParent():GetParent()
+			local title = "Party damage"
+			local line = "Click to show healing done."
+			if host.partyList == "healing" then
+				title = "Party healing"
+				line = "Click to show damage done."
+			end
+			if showTip then
+				showTip(this, "RIGHT", title, nil, {
+					{ line, 1, 1, 1 },
+				})
+			end
+		end)
+		swap:SetScript("OnLeave", function()
+			if leaveTip then
+				leaveTip()
+			end
+		end)
+		win.partySwap = swap
+	end
+	swap:Show()
+	swap:ClearAllPoints()
+	swap:SetPoint("LEFT", win.cols, "LEFT", 0, 0)
+	swap:SetFrameLevel((win.cols:GetFrameLevel() or 1) + 2)
+	if AZS_SetOnTopOfScreens and swap:GetName() and swap:GetName() ~= "" then
+		pcall(AZS_SetOnTopOfScreens, swap, true)
+	end
+	if win.partyList == "healing" then
+		swap.icon:SetTexture("Interface\\Icons\\Spell_Holy_Heal")
+	else
+		swap.icon:SetTexture("Interface\\Icons\\INV_Sword_04")
+	end
+	if win.countText then
+		win.countText:ClearAllPoints()
+		win.countText:SetPoint("LEFT", swap, "RIGHT", 4, 0)
+	end
+end
+
+function AZSSpellMeter_PartyOpen(host, ownerId, name)
+	if not host or not ownerId or ownerId == "" or host.partyOwner then
+		return
+	end
+	local mode = host.fixed or viewMode()
+	if mode ~= "party" then
+		return
+	end
+	host.partyOwner = ownerId
+	host.partyOwnerName = name
+	host.partyView = "damage"
+	if host == frame then
+		scroll = 0
+	else
+		host.scrollPos = 0
+	end
 end
 
 function makeChromeIcon(parent, name)
@@ -7089,6 +7911,19 @@ function paintDpsGraph(win, hist, on, mode, link)
 		box.painting = false
 		return
 	end
+	local histN = hist and table.getn(hist) or 0
+	local histTail = 0
+	if histN > 0 and hist[histN] then
+		histTail = hist[histN].t or 0
+	end
+	if not forceDraw and box.skipHistT == histTail and box.skipHistN == histN and box.skipPlotW == (box.plotW or 0) and box.skipPlotH == (box.plotH or 0) then
+		box.painting = false
+		return
+	end
+	box.skipHistT = histTail
+	box.skipHistN = histN
+	box.skipPlotW = box.plotW or 0
+	box.skipPlotH = box.plotH or 0
 	local series = buildSeries(hist, box.showAmount)
 	box.series = series
 	local sn = table.getn(series)
@@ -7554,7 +8389,7 @@ local function hideTipExtras(tip)
 	end
 end
 
-local function paintTip(title, icon, lines)
+local function paintTip(title, icon, lines, portraitKey)
 	local tip = frame and frame.tip
 	if not tip then
 		return
@@ -7563,8 +8398,11 @@ local function paintTip(title, icon, lines)
 	tip.title:SetText(title or "")
 	tip.title:Show()
 	local left = 8
-	if icon then
-		tip.icon:SetTexture(icon)
+	local portrait = portraitKey and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ApplyPortrait and AZSSpellMeter_Ledger.ApplyPortrait(tip.icon, portraitKey)
+	if portrait or icon then
+		if not portrait then
+			tip.icon:SetTexture(icon)
+		end
 		tip.icon:Show()
 		tip.iconBack:Show()
 		left = 36
@@ -7676,11 +8514,14 @@ local function paintTipBlocks(blocks)
 		local back = tip.headBacks[bi]
 		local left = 8
 		local tex = block.icon
-		if tex and tex ~= "" then
+		local portrait = block.portraitKey and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ApplyPortrait and AZSSpellMeter_Ledger.ApplyPortrait(ic, block.portraitKey)
+		if portrait or (tex and tex ~= "") then
 			back:ClearAllPoints()
 			back:SetPoint("TOPLEFT", tip, "TOPLEFT", 6, y)
 			back:Show()
-			ic:SetTexture(tex)
+			if not portrait then
+				ic:SetTexture(tex)
+			end
 			ic:ClearAllPoints()
 			ic:SetPoint("CENTER", back, "CENTER", 0, 0)
 			ic:Show()
@@ -8072,6 +8913,9 @@ local function createRow(parent, index)
 	local name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	name:SetPoint("LEFT", row, "LEFT", 16, 0)
 	name:SetJustifyH("LEFT")
+	if name.SetNonSpaceWrap then
+		name:SetNonSpaceWrap(false)
+	end
 	face(name, 10)
 	name:SetTextColor(1, 0.95, 0.86)
 	row.name = name
@@ -8119,12 +8963,12 @@ local function createRow(parent, index)
 		for i = 1, table.getn(AZS_SPELLS) do
 			local sp = AZS_SPELLS[i]
 			local key = compactKey(sp and sp.key)
-			if key ~= "" and (key == want or key == alt) then
+			local shown = compactKey(sp and sp.spell)
+			if (key ~= "" and (key == want or key == alt)) or (shown ~= "" and (shown == want or shown == alt)) then
 				local rank = tonumber(sp.rank)
 				if rank and rank >= 1 then
 					return "Rank " .. math.floor(rank + 0.5)
 				end
-				return nil
 			end
 		end
 		return nil
@@ -8218,10 +9062,16 @@ local function createRow(parent, index)
 					table.insert(lines, { "Kills for this are counted on " .. data.parentName .. ".", 0.75, 0.75, 0.75 })
 				end
 			elseif data.procs and data.procs[1] then
-				local text = data.procs[1].name
+				local function listed(p)
+					if p.countLabel and p.countLabel ~= "" then
+						return p.countLabel
+					end
+					return p.name
+				end
+				local text = listed(data.procs[1])
 				local pi
 				for pi = 2, table.getn(data.procs) do
-					text = text .. ", " .. data.procs[pi].name
+					text = text .. ", " .. listed(data.procs[pi])
 				end
 				table.insert(lines, { "Includes " .. text, 0.65, 0.78, 1 })
 			elseif data.cast then
@@ -8236,6 +9086,9 @@ local function createRow(parent, index)
 					table.insert(lines, { "Proc.", 0.7, 0.7, 0.7 })
 				end
 			end
+			if not data.heroRow and not data.child then
+				table.insert(lines, { "Right-click to hide until you change tabs. The total still includes it.", 0.55, 0.5, 0.42 })
+			end
 			local tipIcon = nil
 			if not data.classKey then
 				tipIcon = rowIcon(data)
@@ -8244,13 +9097,30 @@ local function createRow(parent, index)
 			if not tipMode then
 				tipMode = viewMode()
 			end
-			if tipMode ~= "party" then
-				local rankText = upgradeRank(data.name)
+			if tipMode ~= "party" or data.spellRank then
+				local rankText = nil
+				if data.spellRank and data.spellRank >= 1 then
+					rankText = "Rank " .. math.floor(data.spellRank + 0.5)
+				else
+					rankText = upgradeRank(data.name)
+				end
 				if rankText then
 					table.insert(lines, 1, { rankText, 0.55, 0.46, 0.28, true })
 				end
 			end
-			paintTip(data.shown or data.name, tipIcon, lines)
+			if data.heroRow and data.ownerId then
+				table.insert(lines, { "Click for this hero's spells.", 0.7, 0.78, 0.95 })
+				if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.LoadoutLines then
+					local built = AZSSpellMeter_Ledger.LoadoutLines(data.ownerId)
+					if built then
+						local bi
+						for bi = 1, table.getn(built) do
+							table.insert(lines, built[bi])
+						end
+					end
+				end
+			end
+			paintTip(data.shown or data.outLabel or data.name, tipIcon, lines, data.portraitKey)
 		end)
 	end)
 	row:SetScript("OnLeave", function()
@@ -8265,6 +9135,22 @@ local function createRow(parent, index)
 			this.glow:SetVertexColor(1, 0.86, 0.5, 0)
 		end
 		leaveTip()
+	end)
+	row:SetScript("OnMouseUp", function()
+		local data = this.data
+		local host = this.win
+		if arg1 == "RightButton" then
+			if data and data.name and not data.heroRow and not data.child and AZSSpellMeter_ToggleHide then
+				AZSSpellMeter_ToggleHide(host, data.name)
+			end
+			return
+		end
+		if not data or not data.heroRow or not data.ownerId then
+			return
+		end
+		if AZSSpellMeter_PartyOpen then
+			AZSSpellMeter_PartyOpen(host, data.ownerId, data.name)
+		end
 	end)
 
 	row.procBtns = {}
@@ -8337,6 +9223,13 @@ local function createRow(parent, index)
 							crits = landed
 						end
 						table.insert(lines, { string.format("%d hits, %d crits, %s crit", landed, crits, fmtPct(crits / landed)), 1, 0.82, 0.55 })
+						if info.name and (info.name == "Hand of Justice" or englishSpell(info.name) == "Hand of Justice") then
+							local hostRow = owner:GetParent()
+							local parentHits = hostRow and hostRow.data and (hostRow.data.hits or 0) or 0
+							if parentHits > 0 then
+								table.insert(lines, { "Cast twice " .. fmtPct(landed / parentHits), 0.75, 0.85, 1 })
+							end
+						end
 					end
 					if (info.best or 0) > 0 then
 						table.insert(lines, { "Biggest crit " .. comma(info.best), 1, 0.82, 0.45 })
@@ -8347,18 +9240,21 @@ local function createRow(parent, index)
 					end
 					if info.summon then
 						table.insert(lines, { "Minion.", 0.65, 0.78, 1 })
-					else
+					elseif info.proc then
 						table.insert(lines, { "Proc.", 0.65, 0.78, 1 })
 					end
 					local tipMode = host and host.fixed
 					if not tipMode then
 						tipMode = viewMode()
 					end
-					if tipMode ~= "party" then
-						local rankText = upgradeRank(info.name)
-						if rankText then
-							table.insert(lines, 1, { rankText, 0.55, 0.46, 0.28, true })
-						end
+					local rankText = nil
+					if info.rank and info.rank >= 1 then
+						rankText = "Rank " .. math.floor(info.rank + 0.5)
+					elseif tipMode ~= "party" then
+						rankText = upgradeRank(info.name)
+					end
+					if rankText then
+						table.insert(lines, 1, { rankText, 0.55, 0.46, 0.28, true })
 					end
 					return lines
 				end
@@ -8368,8 +9264,9 @@ local function createRow(parent, index)
 					for si = 1, table.getn(owner.stack) do
 						local info = owner.stack[si]
 						blocks[si] = {
-							title = info.name,
+							title = info.countLabel or info.name,
 							icon = tipIconFor(info),
+							portraitKey = info.portraitKey,
 							lines = linesFor(info),
 						}
 					end
@@ -8380,7 +9277,7 @@ local function createRow(parent, index)
 						hideTip()
 						return
 					end
-					paintTip(info.name, tipIconFor(info), linesFor(info))
+					paintTip(info.countLabel or info.name, tipIconFor(info), linesFor(info), info.portraitKey)
 				end
 			end)
 			this:SetBackdropBorderColor(0.7, 0.86, 1, 1)
@@ -8750,6 +9647,7 @@ createDetached = function(mode)
 	resetText:SetTextColor(1, 0.86, 0.5)
 	win.resetText = resetText
 	resetBtn:SetScript("OnClick", function()
+		AZSSpellMeter_Focus = win
 		windowReset(false, mode)
 		refresh()
 		if mode == "healing" then
@@ -9087,6 +9985,7 @@ detach = function(mode)
 		win = createDetached(mode)
 		built[mode] = win
 	end
+	AZSSpellMeter_ClearHide(win)
 	popped[mode] = win
 	win:Show()
 	raiseOverCards(win)
@@ -9104,6 +10003,7 @@ dock = function(mode)
 	local win = popped[mode]
 	popped[mode] = nil
 	if win then
+		AZSSpellMeter_ClearHide(win)
 		win:Hide()
 		savePop(win)
 	end
@@ -9669,18 +10569,16 @@ local function buildSettings()
 		else
 			box.lockHit.mark:Hide()
 		end
+		box.detailHit.label:SetTextColor(0.9, 0.84, 0.68)
 		if lookValue("flat") then
 			box.flatHit.mark:Show()
-			box.detailHit.mark:Hide()
-			box.detailHit.label:SetTextColor(0.45, 0.4, 0.32)
 		else
 			box.flatHit.mark:Hide()
-			box.detailHit.label:SetTextColor(0.9, 0.84, 0.68)
-			if lookValue("detail") then
-				box.detailHit.mark:Show()
-			else
-				box.detailHit.mark:Hide()
-			end
+		end
+		if lookValue("detail") then
+			box.detailHit.mark:Show()
+		else
+			box.detailHit.mark:Hide()
 		end
 		if lookValue("wrap") then
 			box.wrapHit.mark:Show()
@@ -9931,17 +10829,14 @@ local function buildSettings()
 	box.flatHit:SetScript("OnEnter", function()
 		showTip(this, "RIGHT", "Each spell alone", nil, {
 			{ "Each spell, talent, and item stays on its own row, as Damage Done lists them.", 1, 1, 1 },
-			{ "A proc is the spell it casts, so that row has no kill count.", 0.75, 0.75, 0.75 },
-			{ "Off groups the proc into that spell, which is where the kill is counted.", 0.75, 0.75, 0.75 },
+			{ "A minion's own attacks stay on that minion.", 0.75, 0.75, 0.75 },
+			{ "Off groups a proc into the spell it came from.", 0.75, 0.75, 0.75 },
 		})
 	end)
 	box.flatHit:SetScript("OnLeave", function()
 		leaveTip()
 	end)
 	box.detailHit:SetScript("OnClick", function()
-		if lookValue("flat") then
-			return
-		end
 		local saved = ensureLook()
 		if saved.detail then
 			saved.detail = nil
@@ -9952,15 +10847,10 @@ local function buildSettings()
 		refresh()
 	end)
 	box.detailHit:SetScript("OnEnter", function()
-		if lookValue("flat") then
-			showTip(this, "RIGHT", "Under the spell", nil, {
-				{ "Each spell alone is on, so nothing is grouped under another spell.", 1, 1, 1 },
-			})
-			return
-		end
 		showTip(this, "RIGHT", "Under the spell", nil, {
-			{ "An arrow on a spell opens the talents grouped into it.", 1, 1, 1 },
-			{ "Off leaves those talents as icons beside the name.", 0.75, 0.75, 0.75 },
+			{ "An arrow opens whatever is grouped into that row.", 1, 1, 1 },
+			{ "Off leaves those as icons beside the name.", 0.75, 0.75, 0.75 },
+			{ "Minion attacks stay grouped, so this still works when each spell is alone.", 0.75, 0.75, 0.75 },
 		})
 	end)
 	box.detailHit:SetScript("OnLeave", function()
@@ -10282,6 +11172,7 @@ local function buildMainChrome()
 			config().viewChosen = 1
 			config().view = this.mode
 			scroll = 0
+			AZSSpellMeter_ClearHide(frame)
 			refresh()
 		end)
 		btn:SetScript("OnEnter", function()
@@ -10438,6 +11329,7 @@ local function buildMainChrome()
 	face(resetText, 9)
 	resetText:SetTextColor(1, 0.86, 0.5)
 	resetBtn:SetScript("OnClick", function()
+		AZSSpellMeter_Focus = frame
 		windowReset(false)
 		refresh()
 		local mode = viewMode()
@@ -10854,6 +11746,9 @@ local function onCreatureDeath(msg)
 end
 
 local function onCombat(kind)
+	if AZSSpellMeter_TouchBoss then
+		AZSSpellMeter_TouchBoss()
+	end
 	ingest(arg1, kind)
 end
 
@@ -11092,7 +11987,14 @@ SlashCmdList["AZSSPELLMETER"] = function(msg)
 		if not anyMeterShown() then
 			restoreStockMeter()
 		end
+	elseif msg == "showrows" then
+		if AZSSpellMeter_ClearAllHide then
+			AZSSpellMeter_ClearAllHide()
+		end
+		say("Hidden rows are showing again.")
+		refresh()
 	elseif msg == "reset" then
+		AZSSpellMeter_Focus = frame
 		windowReset(true)
 		refresh()
 		local mode = viewMode()
