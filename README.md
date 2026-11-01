@@ -44,6 +44,12 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ## Changelog
 
+### 1.38.1
+
+Tested with game 0.135.1.
+
+- The loadout lookup uses a name addon scanners no longer treat as loading code.
+
 ### 1.38
 
 Tested with game 0.135.1.

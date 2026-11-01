@@ -431,17 +431,17 @@ function AZSSpellMeter_Ledger.RefreshSelected()
 	if AZSSpellMeter_Ledger.SelectStamp == stamp then
 		return
 	end
-	local load = AZS_GetMeterLoadout({ apiVersion = 1, runId = ctx.runId, ownerId = ctx.localOwnerId })
-	if not load or not load.abilities or not load.sources then
+	local loadout = AZS_GetMeterLoadout({ apiVersion = 1, runId = ctx.runId, ownerId = ctx.localOwnerId })
+	if not loadout or not loadout.abilities or not loadout.sources then
 		AZSSpellMeter_Ledger.Selected = nil
 		return
 	end
 	local set = {}
 	local i
-	for i = 1, table.getn(load.abilities) do
-		local ability = load.abilities[i]
+	for i = 1, table.getn(loadout.abilities) do
+		local ability = loadout.abilities[i]
 		if ability and ability.selected and ability.sourceKey then
-			local source = load.sources[ability.sourceKey]
+			local source = loadout.sources[ability.sourceKey]
 			if source and source.name and source.name ~= "" then
 				local rank = tonumber(ability.rank)
 				if not rank or rank < 1 then
@@ -667,8 +667,8 @@ function AZSSpellMeter_Ledger.LoadoutLines(ownerId)
 	if not ctx or not ownerId or ownerId == "" or not AZS_GetMeterLoadout then
 		return nil
 	end
-	local load = AZS_GetMeterLoadout({ apiVersion = 1, runId = ctx.runId, ownerId = ownerId })
-	if not load or not load.sources then
+	local loadout = AZS_GetMeterLoadout({ apiVersion = 1, runId = ctx.runId, ownerId = ownerId })
+	if not loadout or not loadout.sources then
 		return nil
 	end
 	local lines = {}
@@ -679,26 +679,26 @@ function AZSSpellMeter_Ledger.LoadoutLines(ownerId)
 		lines[table.getn(lines) + 1] = { text, 0.7, 0.78, 0.95 }
 	end
 	local function sourceName(key)
-		local source = key and load.sources[key]
+		local source = key and loadout.sources[key]
 		if source and source.name and source.name ~= "" then
 			return source.name
 		end
 		return nil
 	end
-	if load.talents then
+	if loadout.talents then
 		local i
-		for i = 1, table.getn(load.talents) do
-			local talent = load.talents[i]
+		for i = 1, table.getn(loadout.talents) do
+			local talent = loadout.talents[i]
 			local name = sourceName(talent.sourceKey)
 			if name and talent.rank and talent.rank >= 1 then
 				push(name .. " " .. math.floor(talent.rank + 0.5))
 			end
 		end
 	end
-	if load.abilities then
+	if loadout.abilities then
 		local i
-		for i = 1, table.getn(load.abilities) do
-			local ability = load.abilities[i]
+		for i = 1, table.getn(loadout.abilities) do
+			local ability = loadout.abilities[i]
 			if ability.selected or ability.learned then
 				push(sourceName(ability.sourceKey))
 			end
