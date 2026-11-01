@@ -46,7 +46,7 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ### 1.37
 
-Tested with game 0.131.0.
+Tested with game 0.135.1.
 
 - A party member opens into that hero's spells, healing, and boss damage. Back returns to the party list.
 - A pet's spell stays on the pet, and each minion keeps its own icon. Two or more demons still share the Minions row, and other pets share Pets.
