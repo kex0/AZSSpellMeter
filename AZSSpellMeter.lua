@@ -205,6 +205,9 @@ local function loadState()
 	state.elapsed = state.elapsed or 0
 	state.level = state.level or 0
 	state.anchor = nil
+	if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.AttachHits then
+		AZSSpellMeter_Ledger.AttachHits(state)
+	end
 end
 
 local function elapsed()
@@ -691,10 +694,13 @@ local function note(spell, amount, crit, victim)
 			end
 			note(spell, amount, crit, victim)
 			local side = castKeep or castName
+			if (kind == "petmelee" or kind == "summonmelee") and (not side or side == "") then
+				side = "Melee"
+			end
+			-- The last blow stays on the minion's spell, so the kill is that
+			-- spell's. The minion row still adds those kills up.
 			if side and side ~= "" and side ~= spell and victim then
-				local keepBlow = lastBlow[victim]
 				note(spell .. "\031" .. side, amount, crit, victim)
-				lastBlow[victim] = keepBlow
 			end
 		end
 	end
@@ -1879,6 +1885,11 @@ AZSSpellMeter_MinionShared = {
 	["Dread Lord"] = "Searing Pain",
 	["Doomguard"] = "Shadow Bolt",
 }
+-- The meter names the cast. The combat log still uses the spell it borrowed.
+AZSSpellMeter_LogSpell = {
+	["Felseeker"] = "Searing Pain",
+	["Firebolt"] = "Fireball",
+}
 -- Death Coil is the succubus until the hero has that skill selected.
 AZSSpellMeter_MinionSkill = {
 	["Death Coil"] = "Succubus",
@@ -2852,6 +2863,55 @@ local function restoreStockMeter()
 	end
 end
 
+function AZSSpellMeter_BeginNewRun()
+	if not state then
+		return
+	end
+	state.spells = {}
+	state.kills = 0
+	state.best = nil
+	state.bossSpells = {}
+	state.bossBest = nil
+	state.bossFight = nil
+	state.bossSeenTotal = nil
+	lastBlow = {}
+	if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.WipeHits then
+		AZSSpellMeter_Ledger.WipeHits()
+	end
+	state.base = nil
+	state.baseTotal = nil
+	state.baseTime = nil
+	state.healBase = nil
+	state.healBaseTotal = nil
+	state.healBaseTime = nil
+	state.bossBase = nil
+	state.bossBaseTotal = nil
+	state.bossBaseTime = nil
+	state.takenBase = nil
+	state.takenBaseTotal = nil
+	state.takenBaseTime = nil
+	state.partyBase = nil
+	state.partyBaseTotal = nil
+	state.partyBaseTime = nil
+	clearColHold()
+	clearRecentRate()
+	local gMode, graph
+	for gMode, graph in pairs(graphBoxes) do
+		graph.viewStart = nil
+		graph.viewSpan = nil
+		graph.follow = false
+		graph.lockFull = false
+		graph.axisMax = nil
+		graph.graphLive = false
+	end
+	runSeen = 0
+	AZSSpellMeter_AwaitNewRun = nil
+	say("New run.")
+	if AZSSpellMeter_ClearAllHide then
+		AZSSpellMeter_ClearAllHide()
+	end
+end
+
 -- A new run rewinds the game clock. The meter clears itself; kills are ours.
 local function watchRun()
 	if not AZS_GetRunTime then
@@ -2872,47 +2932,14 @@ local function watchRun()
 	-- A real new run starts near zero. A few seconds of lag can rewind the
 	-- clock without starting over, so that must not wipe the meter or the graph.
 	if runSeen and t + 1 < runSeen and t < 2 and ((state.kills or 0) > 0 or state.base or state.healBase or state.bossBase or state.takenBase or state.partyBase) then
-		state.spells = {}
-		state.kills = 0
-		state.best = nil
-		state.bossSpells = {}
-		state.bossBest = nil
-		state.bossFight = nil
-		state.bossSeenTotal = nil
-		lastBlow = {}
-		if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.WipeHits then
-			AZSSpellMeter_Ledger.WipeHits()
+		-- The damage meter is still climbing, so this is a clock dip, not a new run.
+		if (meterTotal or 0) > 50 then
+			if GetTime then
+				AZSSpellMeter_AwaitNewRun = GetTime() + 3
+			end
+			return
 		end
-		state.base = nil
-		state.baseTotal = nil
-		state.baseTime = nil
-		state.healBase = nil
-		state.healBaseTotal = nil
-		state.healBaseTime = nil
-		state.bossBase = nil
-		state.bossBaseTotal = nil
-		state.bossBaseTime = nil
-		state.takenBase = nil
-		state.takenBaseTotal = nil
-		state.takenBaseTime = nil
-		state.partyBase = nil
-		state.partyBaseTotal = nil
-		state.partyBaseTime = nil
-		clearColHold()
-		clearRecentRate()
-		local gMode, graph
-		for gMode, graph in pairs(graphBoxes) do
-			graph.viewStart = nil
-			graph.viewSpan = nil
-			graph.follow = false
-			graph.lockFull = false
-			graph.axisMax = nil
-			graph.graphLive = false
-		end
-		say("New run.")
-		if AZSSpellMeter_ClearAllHide then
-			AZSSpellMeter_ClearAllHide()
-		end
+		AZSSpellMeter_BeginNewRun()
 	end
 	runSeen = t
 end
@@ -3318,6 +3345,13 @@ local function rebuild(mode)
 	end
 	local lines, total, rdps = pullMeter(mode)
 	local gameTotal = tonumber(total) or 0
+	if AZSSpellMeter_AwaitNewRun then
+		if gameTotal < 50 then
+			AZSSpellMeter_BeginNewRun()
+		elseif GetTime and GetTime() > AZSSpellMeter_AwaitNewRun then
+			AZSSpellMeter_AwaitNewRun = nil
+		end
+	end
 	if mode == "boss" then
 		syncBossFight(gameTotal)
 	end
@@ -3763,6 +3797,17 @@ local function rebuild(mode)
 		meterDps = windowRate
 	end
 	if lines and lines.pendingProcs and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.FoldProcs then
+		i = 1
+		while lines.pendingProcs[i] do
+			if lines.pendingProcs[i] and not lines.pendingProcs[i].rateReady and (lines.pendingProcs[i].dmg or 0) > 0 and (lines.pendingProcs[i].dps or 0) <= 0 then
+				if runNow() < 1 then
+					lines.pendingProcs[i].dps = lines.pendingProcs[i].dmg
+				else
+					lines.pendingProcs[i].dps = lines.pendingProcs[i].dmg / runNow()
+				end
+			end
+			i = i + 1
+		end
 		if mode == "boss" then
 			AZSSpellMeter_Ledger.HitBook = "boss"
 		else
@@ -3805,6 +3850,17 @@ local function rebuild(mode)
 				local proc = filledRow.procs[fi]
 				if proc and (not proc.icon or proc.icon == "") then
 					proc.icon = iconFor(proc.name)
+				end
+				if proc and not proc.summon and (proc.damage or 0) > 0 and (proc.dps or 0) <= 0 then
+					if runNow() < 1 then
+						proc.dps = proc.damage
+					else
+						proc.dps = proc.damage / runNow()
+					end
+				end
+				-- One attack did the whole row. Its kills are that row's kills.
+				if proc and not proc.summon and (proc.kills or 0) == 0 and (proc.damage or 0) > 0 and (filledRow.kills or 0) > 0 and proc.damage + 0.5 >= (filledRow.damage or 0) then
+					proc.kills = filledRow.kills
 				end
 				fi = fi + 1
 			end
@@ -3852,6 +3908,7 @@ local function rebuild(mode)
 				if parent.own == nil then
 					parent.own = parent.damage or 0
 					parent.ownDps = parent.dps or 0
+					parent.ownKills = parent.kills or 0
 				end
 				parent.damage = (parent.damage or 0) + partDmg
 				parent.dps = (parent.dps or 0) + partRate
@@ -3887,6 +3944,9 @@ local function rebuild(mode)
 						have.dps = (have.dps or 0) + partRate
 						have.hits = (have.hits or 0) + phits
 						have.crits = (have.crits or 0) + pcrits
+						if pi == 1 then
+							have.kills = (have.kills or 0) + kills
+						end
 						have.proc = true
 						if not have.icon or have.icon == "" then
 							have.icon = procIcon
@@ -3900,7 +3960,7 @@ local function rebuild(mode)
 							name = link.proc,
 							damage = partDmg,
 							dps = partRate,
-							kills = 0,
+							kills = (pi == 1) and kills or 0,
 							hits = phits,
 							crits = pcrits,
 							icon = procIcon,
@@ -4075,14 +4135,11 @@ local function rebuild(mode)
 			keep = false
 		end
 		if keep then
-			-- A proc is the spell it casts. Its kills belong to that spell, so a
-			-- separate row has no kill count of its own.
+			-- Each spell alone leaves this as its own row, and that row keeps
+			-- the kills combat text named for it.
 			if not entry.procs and (entry.proc or (PROC_CAST[englishSpell(name)] and not PROC_CAST[englishSpell(name)].onlyProc)) then
 				if not entry.cast then
 					entry.cast = castList(name)
-				end
-				if config().look and config().look.flat then
-					entry.noKill = true
 				end
 			elseif not entry.procs and string.find(name, ": ", 1, true) then
 				local enSpell = englishSpell(name)
@@ -4094,9 +4151,6 @@ local function rebuild(mode)
 						if castSpell and castSpell ~= "" then
 							entry.cast = clientSpell(castSpell)
 						end
-					end
-					if config().look and config().look.flat then
-						entry.noKill = true
 					end
 				end
 			end
@@ -4150,7 +4204,7 @@ local function rebuild(mode)
 							name = entry.name,
 							damage = entry.own or 0,
 							dps = entry.ownDps or 0,
-							kills = 0,
+							kills = entry.ownKills or 0,
 							hits = entry.hits or 0,
 							crits = entry.crits or 0,
 							best = entry.best or 0,
@@ -4215,49 +4269,16 @@ local function noteDeath()
 			say("Downed mostly by " .. bestName .. ", " .. comma(best) .. ". The Taken tab has the rest.")
 		end
 	end
-	-- Pressing Again after death starts a new attempt. The built-in meter clears;
-	-- wipe our DPS trail and kill tally so rates are not stuck at 0.
+	-- Pressing Again after death starts a new attempt. Wait until the meter's
+	-- own total actually drops, so a flicker does not throw away this run's kills.
 	if seenPhase == "dead" and ph and ph ~= "dead" then
-		clearRecentRate()
-		clearColHold()
-		if state then
-			state.spells = {}
-			state.kills = 0
-			state.best = nil
-			state.bossSpells = {}
-			state.bossBest = nil
-			state.bossFight = nil
-			state.bossSeenTotal = nil
-			state.base = nil
-			state.baseTotal = nil
-			state.baseTime = nil
-			state.healBase = nil
-			state.healBaseTotal = nil
-			state.healBaseTime = nil
-			state.bossBase = nil
-			state.bossBaseTotal = nil
-			state.bossBaseTime = nil
-			state.takenBase = nil
-			state.takenBaseTotal = nil
-			state.takenBaseTime = nil
-			state.partyBase = nil
-			state.partyBaseTotal = nil
-			state.partyBaseTime = nil
+		if (meterTotal or 0) > 50 then
+			if GetTime then
+				AZSSpellMeter_AwaitNewRun = GetTime() + 3
+			end
+		else
+			AZSSpellMeter_BeginNewRun()
 		end
-		lastBlow = {}
-		if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.WipeHits then
-			AZSSpellMeter_Ledger.WipeHits()
-		end
-		local gMode, graph
-		for gMode, graph in pairs(graphBoxes) do
-			graph.axisMax = nil
-			graph.viewStart = nil
-			graph.viewSpan = 30
-			graph.follow = true
-			graph.lockFull = false
-			graph.graphLive = false
-		end
-		say("New run.")
 	end
 	seenPhase = ph
 end
@@ -5034,7 +5055,7 @@ local function refreshWindow(win)
 			else
 				row.name:SetTextColor(1, 0.95, 0.86)
 			end
-			if showKill and not data.ownSpell and not data.noKill and (data.kills or 0) > 0 and (not data.child or (data.kills or 0) > 0) then
+			if showKill and not data.noKill and (data.kills or 0) > 0 and (not data.child or (data.kills or 0) > 0) then
 				row.kills:SetText(tostring(data.kills))
 			else
 				row.kills:SetText("")
@@ -9103,7 +9124,7 @@ local function createRow(parent, index)
 				{ string.format("Share %s", fmtPct(share)), 0.95, 0.86, 0.62 },
 				{ string.format("%s %s", rateWord, fmtRate(data.dps or 0)), 0.7, 0.92, 0.68 },
 			}
-			if killView and not data.noKill and not data.ownSpell and not isProc(data.proc) and not data.cast and (not data.child or (data.kills or 0) > 0) then
+			if killView and not data.noKill and (data.kills or 0) > 0 then
 				table.insert(lines, { string.format("Kills %d", data.kills or 0), 1, 0.82, 0.45 })
 			end
 			local showBest = (data.best or 0) > 0 and table.getn(lines) < 12
@@ -9144,9 +9165,6 @@ local function createRow(parent, index)
 					into = "Grouped into " .. data.parentName .. "."
 				end
 				table.insert(lines, { into, 0.65, 0.78, 1 })
-				if killView and not data.summon and data.parentName and data.parentName ~= "" then
-					table.insert(lines, { "Kills for this are counted on " .. data.parentName .. ".", 0.75, 0.75, 0.75 })
-				end
 			elseif data.procs and data.procs[1] then
 				local function listed(p)
 					if p.countLabel and p.countLabel ~= "" then

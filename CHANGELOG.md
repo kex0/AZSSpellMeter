@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.39.1
+
+- A grouped spell shows its kills on the main skill, and each of a minion's attacks keeps the kills from that attack. Felseeker keeps the kills the log records as Searing Pain. Shadow Bolt on a Doomguard stays separate from yours.
+- A minion's spell keeps a DPS number from its damage, instead of sitting at 0. Each spell alone lists a proc, such as Arcane Concentration, on its own row with its kills.
+- Kills stay for the run. A clock dip or leaving the death screen no longer clears them while damage is still on the meter. Reloading keeps the kills from this run.
+
 ## 1.39
 
 For game 0.139.0. Older builds keep the combat log.

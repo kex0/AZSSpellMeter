@@ -26,7 +26,7 @@ Drag the title bar, or the damage and DPS numbers, to move the window. Drag the 
 
 Damage, Healing, Boss, Taken, and Party are the buttons under the title. Damage includes kills per spell. Healing is health actually restored. Boss is the last boss fight, and it stays up until the next boss. Taken is the damage you took, split by what hit you. Party shows each hero's damage, and only while you are in co-op. Hover a hero's strongest spell to see what it does. The name is in your language. Spell icons and grouped talents still work when a partner plays in another language. DPS looks back 10 seconds unless you change that in settings. A thin bar under a spell icon is its cooldown. Hover a spell for its hits and crits. Hover the total for your build stats.
 
-The gear on the title bar opens settings: scale, opacity, background, the DPS window, columns, colors, cooldown bars, and lock. Share is that spell's part of the total. Each spell alone lists every spell, talent, and item on its own row, as Damage Done does. A proc is the spell it casts, so that row has no kill count. Under the spell adds an arrow that lists the talents grouped into a spell. Wrap names splits a long name onto a second line, and it is off until you turn it on. Since the start there uses the average for the whole run, or the whole boss fight. Right-click the bubble for the same window. Reset settings there puts those back. Your numbers and window positions stay.
+The gear on the title bar opens settings: scale, opacity, background, the DPS window, columns, colors, cooldown bars, and lock. Share is that spell's part of the total. Each spell alone lists every spell, talent, and item on its own row, as Damage Done does, and that row keeps its kills. Under the spell adds an arrow that lists the talents grouped into a spell. Wrap names splits a long name onto a second line, and it is off until you turn it on. Since the start there uses the average for the whole run, or the whole boss fight. Right-click the bubble for the same window. Reset settings there puts those back. Your numbers and window positions stay.
 
 Right-click a button to open that view in its own window. The button stays, dimmed. Click it, or the x on the extra window, to bring the view back. Each view is only in one place. The extra window has its own size, position, and Reset.
 
@@ -43,6 +43,12 @@ While the main window, its bubble, or an extra window is open, the built-in Dama
 The window position is remembered across updates. Deleting the addon folder does not clear it. If the window is missing, type `/azsm resetpos`.
 
 ## Changelog
+
+### 1.39.1
+
+- A grouped spell shows its kills on the main skill, and each of a minion's attacks keeps the kills from that attack. Felseeker keeps the kills the log records as Searing Pain. Shadow Bolt on a Doomguard stays separate from yours.
+- A minion's spell keeps a DPS number from its damage, instead of sitting at 0. Each spell alone lists a proc, such as Arcane Concentration, on its own row with its kills.
+- Kills stay for the run. A clock dip or leaving the death screen no longer clears them while damage is still on the meter. Reloading keeps the kills from this run.
 
 ### 1.39
 

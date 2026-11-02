@@ -288,6 +288,9 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 	if line.procs then
 		row.procs = line.procs
 	end
+	if line.sourceKey and line.sourceKey ~= "" then
+		row.sourceKey = line.sourceKey
+	end
 	if AZSSpellMeter_Ledger.HitLive then
 		AZSSpellMeter_Ledger.HitPass = (AZSSpellMeter_Ledger.HitPass or 0) + 1
 		local pass = AZSSpellMeter_Ledger.HitPass
@@ -336,11 +339,39 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 				if proc and not proc.summon then
 					seen = {}
 					takeAll(proc.sourceKeys, proc.sourceKey, proc)
+					if (proc.kills or 0) == 0 and (proc.hits or 0) == 0 and proc.name and AZSSpellMeter_Ledger.MeterByName then
+						local who = proc.actorId
+						local actors = AZSSpellMeter_Ledger.SpellActors
+						local info = actors and actors[proc.name]
+						if info and info.hero and (not who or who == "") then
+							who = "\031"
+						end
+						local named = AZSSpellMeter_Ledger.MeterByName(proc.name, who)
+						if named then
+							proc.hits = named.hits or 0
+							proc.crits = named.crits or 0
+							proc.kills = named.kills or 0
+							proc.best = named.best or 0
+						end
+					end
 					if line.actorPack then
 						seen = {}
 						takeAll(proc.sourceKeys, proc.sourceKey, row)
 					end
 				end
+			end
+		end
+		if line.actorPack and row.procs then
+			local sum = 0
+			local pk
+			for pk = 1, table.getn(row.procs) do
+				local one = row.procs[pk]
+				if one and not one.summon then
+					sum = sum + (one.kills or 0)
+				end
+			end
+			if sum > (row.kills or 0) then
+				row.kills = sum
 			end
 		end
 		return
@@ -412,6 +443,15 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 					if not rec and toEnglish then
 						rec = spells[row.name .. "\031" .. (toEnglish(proc.name) or proc.name)]
 					end
+					if not rec and AZSSpellMeter_LogSpell then
+						local alias = AZSSpellMeter_LogSpell[proc.name]
+						if not alias and toEnglish then
+							alias = AZSSpellMeter_LogSpell[toEnglish(proc.name)]
+						end
+						if alias then
+							rec = spells[row.name .. "\031" .. alias]
+						end
+					end
 				else
 					rec = spells[proc.name]
 					if not rec and toEnglish then
@@ -428,6 +468,17 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 				end
 			end
 		end
+	end
+	if line.actorPack and row.procs then
+		local sum = 0
+		local pk
+		for pk = 1, table.getn(row.procs) do
+			local one = row.procs[pk]
+			if one and not one.summon then
+				sum = sum + (one.kills or 0)
+			end
+		end
+		row.kills = (row.kills or 0) + sum
 	end
 end
 
@@ -899,6 +950,11 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 				usedDmg = usedDmg + partDmg
 				usedRate = usedRate + partRate
 				local parent = bucketOf(parents[pi])
+				if parent.own == nil then
+					parent.own = parent.damage or 0
+					parent.ownDps = parent.dps or 0
+					parent.ownKills = parent.kills or 0
+				end
 				parent.damage = (parent.damage or 0) + partDmg
 				parent.dps = (parent.dps or 0) + partRate
 				parent.fromMeter = true
@@ -930,6 +986,9 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 								have.hits = (have.hits or 0) + (extra.hits or 0)
 								have.crits = (have.crits or 0) + (extra.crits or 0)
 								have.kills = (have.kills or 0) + (extra.kills or 0)
+								if pi == 1 then
+									parent.kills = (parent.kills or 0) + (extra.kills or 0)
+								end
 								if (extra.best or 0) > (have.best or 0) then
 									have.best = extra.best
 								end
@@ -946,6 +1005,12 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 						local rec = nil
 						if AZSSpellMeter_Ledger.HitLive then
 							rec = AZSSpellMeter_Ledger.MeterStat(spell.sourceKey)
+							if AZSSpellMeter_Ledger.MeterByName and (not rec or (rec.kills or 0) == 0) then
+								local named = AZSSpellMeter_Ledger.MeterByName(spell.name, nil, parent.sourceKey)
+								if named and (named.kills or 0) > 0 then
+									rec = named
+								end
+							end
 						elseif spells and pi == 1 then
 							rec = spells[spell.name]
 							if not rec and toEnglish then
@@ -957,6 +1022,9 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 							crits = rec.crits or 0
 							kills = rec.kills or 0
 							best = rec.best or 0
+						end
+						if pi == 1 and kills > 0 then
+							parent.kills = (parent.kills or 0) + kills
 						end
 						local slot = 1
 						while parent.procs[slot] do
@@ -1377,6 +1445,7 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 						icon = icon,
 						rank = source and tonumber(source.rank) or nil,
 						sourceKey = sourceKey,
+						actorId = raw.actorId,
 						hits = 0,
 						crits = 0,
 					}
@@ -1541,13 +1610,101 @@ function AZSSpellMeter_Ledger.MeterStat(key)
 	return book[key]
 end
 
+-- Hits the meter named for this spell. A button's source key can miss the
+-- combat-text key, so the spell name is the other way to find them. who
+-- keeps one pet's Melee off another pet's Melee.
+function AZSSpellMeter_Ledger.MeterByName(name, who, skipKey)
+	if not name or name == "" then
+		return nil
+	end
+	local book = AZSSpellMeter_Ledger.Hits
+	if AZSSpellMeter_Ledger.HitBook == "boss" then
+		book = AZSSpellMeter_Ledger.BossHits
+	end
+	if not book then
+		return nil
+	end
+	local hits, crits, kills, best = 0, 0, 0, 0
+	local found = false
+	local key, rec
+	for key, rec in pairs(book) do
+		local same = rec and rec.spell == name and key ~= skipKey
+		if same and who and who ~= "" and rec.who ~= who then
+			same = false
+		end
+		if same then
+			found = true
+			hits = hits + (rec.hits or 0)
+			crits = crits + (rec.crits or 0)
+			kills = kills + (rec.kills or 0)
+			if (rec.best or 0) > best then
+				best = rec.best
+			end
+		end
+	end
+	if not found then
+		return nil
+	end
+	return { hits = hits, crits = crits, kills = kills, best = best }
+end
+
+function AZSSpellMeter_Ledger.AttachHits(saved)
+	if not saved then
+		return
+	end
+	if not saved.meterHits then
+		saved.meterHits = {}
+	end
+	local book = saved.meterHits
+	if not book.hits then
+		book.hits = {}
+	end
+	if not book.boss then
+		book.boss = {}
+	end
+	if not book.blows then
+		book.blows = {}
+	end
+	AZSSpellMeter_Ledger.Hits = book.hits
+	AZSSpellMeter_Ledger.BossHits = book.boss
+	AZSSpellMeter_Ledger.Blows = book.blows
+	AZSSpellMeter_Ledger.BestHit = book.best
+	AZSSpellMeter_Ledger.BossBest = book.bossBest
+	AZSSpellMeter_Ledger.HitCursor = book.cursor
+	AZSSpellMeter_Ledger.HitStream = book.stream
+	AZSSpellMeter_Ledger.HitSaved = book
+end
+
+function AZSSpellMeter_Ledger.KeepHits()
+	local book = AZSSpellMeter_Ledger.HitSaved
+	if not book then
+		return
+	end
+	book.best = AZSSpellMeter_Ledger.BestHit
+	book.bossBest = AZSSpellMeter_Ledger.BossBest
+	book.cursor = AZSSpellMeter_Ledger.HitCursor
+	book.stream = AZSSpellMeter_Ledger.HitStream
+end
+
 function AZSSpellMeter_Ledger.WipeHits()
-	AZSSpellMeter_Ledger.Hits = {}
-	AZSSpellMeter_Ledger.BossHits = {}
-	AZSSpellMeter_Ledger.Blows = {}
+	local book = AZSSpellMeter_Ledger.HitSaved
 	AZSSpellMeter_Ledger.HitSeen = {}
 	AZSSpellMeter_Ledger.BestHit = nil
 	AZSSpellMeter_Ledger.BossBest = nil
+	if book then
+		book.hits = {}
+		book.boss = {}
+		book.blows = {}
+		book.best = nil
+		book.bossBest = nil
+		AZSSpellMeter_Ledger.Hits = book.hits
+		AZSSpellMeter_Ledger.BossHits = book.boss
+		AZSSpellMeter_Ledger.Blows = book.blows
+		return
+	end
+	AZSSpellMeter_Ledger.Hits = {}
+	AZSSpellMeter_Ledger.BossHits = {}
+	AZSSpellMeter_Ledger.Blows = {}
 end
 
 function AZSSpellMeter_Ledger.CreditKill(name)
@@ -1611,6 +1768,12 @@ function AZSSpellMeter_Ledger.TakeHit(ev)
 				rec.best = amount
 			end
 		end
+		if ev.meterSource and ev.meterSource ~= "" then
+			rec.spell = ev.meterSource
+		end
+		if ev.sourceId and ev.sourceId ~= "" then
+			rec.who = ev.sourceId
+		end
 		return rec
 	end
 	local hits = AZSSpellMeter_Ledger.Hits
@@ -1649,6 +1812,7 @@ function AZSSpellMeter_Ledger.TakeHit(ev)
 			blows[target] = key
 		end
 	end
+	AZSSpellMeter_Ledger.KeepHits()
 	return true
 end
 
@@ -1689,5 +1853,6 @@ function AZSSpellMeter_Ledger.ReadHits()
 			end
 		end
 	end
+	AZSSpellMeter_Ledger.KeepHits()
 	return true
 end
