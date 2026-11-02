@@ -288,6 +288,63 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 	if line.procs then
 		row.procs = line.procs
 	end
+	if AZSSpellMeter_Ledger.HitLive then
+		AZSSpellMeter_Ledger.HitPass = (AZSSpellMeter_Ledger.HitPass or 0) + 1
+		local pass = AZSSpellMeter_Ledger.HitPass
+		local seen = {}
+		local function take(key, into)
+			if not key or key == "" or not into or seen[key] then
+				return
+			end
+			seen[key] = true
+			-- A minion's spell button is kept with the meter line and painted
+			-- again on the next refresh. Start this pass from the meter's
+			-- count, or the same hits and kills pile on every frame.
+			if into.hitPass ~= pass then
+				into.hitPass = pass
+				into.hits = 0
+				into.crits = 0
+				into.kills = 0
+				into.best = 0
+			end
+			local rec = AZSSpellMeter_Ledger.MeterStat(key)
+			if not rec then
+				return
+			end
+			into.hits = (into.hits or 0) + (rec.hits or 0)
+			into.crits = (into.crits or 0) + (rec.crits or 0)
+			into.kills = (into.kills or 0) + (rec.kills or 0)
+			if (rec.best or 0) > (into.best or 0) then
+				into.best = rec.best
+			end
+		end
+		local function takeAll(keys, one, into)
+			if keys then
+				local i
+				for i = 1, table.getn(keys) do
+					take(keys[i], into)
+				end
+			else
+				take(one, into)
+			end
+		end
+		takeAll(line.sourceKeys, line.sourceKey, row)
+		if row.procs then
+			local pi
+			for pi = 1, table.getn(row.procs) do
+				local proc = row.procs[pi]
+				if proc and not proc.summon then
+					seen = {}
+					takeAll(proc.sourceKeys, proc.sourceKey, proc)
+					if line.actorPack then
+						seen = {}
+						takeAll(proc.sourceKeys, proc.sourceKey, row)
+					end
+				end
+			end
+		end
+		return
+	end
 	local seen = {}
 	local function add(key)
 		if not key or key == "" or key == row.name or seen[key] then
@@ -867,18 +924,39 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 						if spell.icon and (not have.icon or have.icon == "") then
 							have.icon = spell.icon
 						end
+						if spell.sourceKey and spell.sourceKey ~= have.sourceKey and AZSSpellMeter_Ledger.HitLive then
+							local extra = AZSSpellMeter_Ledger.MeterStat(spell.sourceKey)
+							if extra then
+								have.hits = (have.hits or 0) + (extra.hits or 0)
+								have.crits = (have.crits or 0) + (extra.crits or 0)
+								have.kills = (have.kills or 0) + (extra.kills or 0)
+								if (extra.best or 0) > (have.best or 0) then
+									have.best = extra.best
+								end
+							end
+						end
+						if not have.sourceKey then
+							have.sourceKey = spell.sourceKey
+						end
 					else
 						local hits = 0
 						local crits = 0
-						if spells and pi == 1 then
-							local rec = spells[spell.name]
+						local kills = 0
+						local best = 0
+						local rec = nil
+						if AZSSpellMeter_Ledger.HitLive then
+							rec = AZSSpellMeter_Ledger.MeterStat(spell.sourceKey)
+						elseif spells and pi == 1 then
+							rec = spells[spell.name]
 							if not rec and toEnglish then
 								rec = spells[toEnglish(spell.name)]
 							end
-							if rec then
-								hits = rec.hits or 0
-								crits = rec.crits or 0
-							end
+						end
+						if rec then
+							hits = rec.hits or 0
+							crits = rec.crits or 0
+							kills = rec.kills or 0
+							best = rec.best or 0
 						end
 						local slot = 1
 						while parent.procs[slot] do
@@ -890,9 +968,11 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 							dps = partRate,
 							icon = spell.icon,
 							rank = spell.rank,
+							sourceKey = spell.sourceKey,
 							hits = hits,
 							crits = crits,
-							kills = 0,
+							kills = kills,
+							best = best,
 							proc = true,
 						}
 					end
@@ -1271,7 +1351,13 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 					end
 					bp = bp + 1
 				end
-				if haveBtn then
+					if haveBtn then
+					if sourceKey and haveBtn.sourceKey and sourceKey ~= haveBtn.sourceKey then
+						if not haveBtn.sourceKeys then
+							haveBtn.sourceKeys = { haveBtn.sourceKey }
+						end
+						haveBtn.sourceKeys[table.getn(haveBtn.sourceKeys) + 1] = sourceKey
+					end
 					haveBtn.damage = (haveBtn.damage or 0) + (raw.displayAmount or 0)
 					if rowReady then
 						haveBtn.dps = (haveBtn.dps or 0) + rowRate
@@ -1300,6 +1386,15 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 		local function emit(line)
 			local have = named[line.name]
 			if have then
+				if line.sourceKey then
+					if not have.sourceKeys then
+						have.sourceKeys = {}
+						if have.sourceKey then
+							have.sourceKeys[1] = have.sourceKey
+						end
+					end
+					have.sourceKeys[table.getn(have.sourceKeys) + 1] = line.sourceKey
+				end
 				have.dmg = (have.dmg or 0) + (line.dmg or 0)
 				if line.rateReady and have.rateReady then
 					have.dps = (have.dps or 0) + (line.dps or 0)
@@ -1362,6 +1457,7 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 			lines[table.getn(lines) + 1] = line
 		end
 		local function spellLine(spell)
+			local key = spell.raw and spell.raw.sourceKey
 			return {
 				name = spell.name,
 				dmg = spell.dmg,
@@ -1371,6 +1467,8 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 				rank = spell.rank,
 				fromLedger = true,
 				rateReady = spell.rateReady,
+				sourceKey = key,
+				sourceKeys = key and { key } or nil,
 				hitNames = { spell.name },
 				localSpell = mine,
 				procs = spell.procs,
@@ -1400,6 +1498,7 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 					dps = spell.dps,
 					icon = spell.icon,
 					rank = spell.rank,
+					sourceKey = spell.raw and spell.raw.sourceKey,
 					rateReady = spell.rateReady,
 					originNames = names,
 				}
@@ -1426,4 +1525,169 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 	end
 	AZSSpellMeter_Ledger.Snap = { key = key, at = now, lines = lines, total = totalAmount, rate = totalRate }
 	return lines, totalAmount, totalRate
+end
+
+function AZSSpellMeter_Ledger.MeterStat(key)
+	if not key or key == "" then
+		return nil
+	end
+	local book = AZSSpellMeter_Ledger.Hits
+	if AZSSpellMeter_Ledger.HitBook == "boss" then
+		book = AZSSpellMeter_Ledger.BossHits
+	end
+	if not book then
+		return nil
+	end
+	return book[key]
+end
+
+function AZSSpellMeter_Ledger.WipeHits()
+	AZSSpellMeter_Ledger.Hits = {}
+	AZSSpellMeter_Ledger.BossHits = {}
+	AZSSpellMeter_Ledger.Blows = {}
+	AZSSpellMeter_Ledger.HitSeen = {}
+	AZSSpellMeter_Ledger.BestHit = nil
+	AZSSpellMeter_Ledger.BossBest = nil
+end
+
+function AZSSpellMeter_Ledger.CreditKill(name)
+	local blows = AZSSpellMeter_Ledger.Blows
+	if not blows or not name or name == "" then
+		return nil
+	end
+	local key = blows[name]
+	if not key then
+		return nil
+	end
+	local book = AZSSpellMeter_Ledger.Hits
+	local rec = book and book[key]
+	if rec then
+		rec.kills = (rec.kills or 0) + 1
+	end
+	if AZSSpellMeter_Ledger.BossUp then
+		local boss = AZSSpellMeter_Ledger.BossHits
+		local brow = boss and boss[key]
+		if brow then
+			brow.kills = (brow.kills or 0) + 1
+		end
+	end
+	return key
+end
+
+function AZSSpellMeter_Ledger.TakeHit(ev)
+	if type(ev) ~= "table" or ev.kind ~= "damage" then
+		return false
+	end
+	local sk = ev.sourceKind
+	if sk and sk ~= "player" and sk ~= "pet" and sk ~= "summon" and sk ~= "totem" and sk ~= "ownedUnknown" then
+		return false
+	end
+	local key = ev.meterSourceKey
+	if not key or key == "" then
+		return false
+	end
+	if ev.eventId then
+		local seen = AZSSpellMeter_Ledger.HitSeen
+		if not seen then
+			seen = {}
+			AZSSpellMeter_Ledger.HitSeen = seen
+		end
+		if seen[ev.eventId] then
+			return true
+		end
+		seen[ev.eventId] = true
+	end
+	local function bump(book)
+		local rec = book[key]
+		if not rec then
+			rec = { hits = 0, crits = 0, kills = 0, best = 0 }
+			book[key] = rec
+		end
+		rec.hits = rec.hits + 1
+		local amount = tonumber(ev.amount) or 0
+		if ev.critical then
+			rec.crits = rec.crits + 1
+			if amount > (rec.best or 0) then
+				rec.best = amount
+			end
+		end
+		return rec
+	end
+	local hits = AZSSpellMeter_Ledger.Hits
+	if not hits then
+		hits = {}
+		AZSSpellMeter_Ledger.Hits = hits
+	end
+	local rec = bump(hits)
+	if rec.best and rec.best > (AZSSpellMeter_Ledger.BestHit or 0) then
+		AZSSpellMeter_Ledger.BestHit = rec.best
+	end
+	if AZSSpellMeter_Ledger.BossUp then
+		local boss = AZSSpellMeter_Ledger.BossHits
+		if not boss then
+			boss = {}
+			AZSSpellMeter_Ledger.BossHits = boss
+		end
+		local brow = bump(boss)
+		if brow.best and brow.best > (AZSSpellMeter_Ledger.BossBest or 0) then
+			AZSSpellMeter_Ledger.BossBest = brow.best
+		end
+	end
+	local target = ev.targetName
+	if target and target ~= "" then
+		target = string.gsub(target, "|c%x%x%x%x%x%x%x%x", "")
+		target = string.gsub(target, "|r", "")
+		target = string.gsub(target, "^%s+", "")
+		target = string.gsub(target, "%s+$", "")
+		target = string.gsub(target, "%.$", "")
+		if target ~= "" then
+			local blows = AZSSpellMeter_Ledger.Blows
+			if not blows then
+				blows = {}
+				AZSSpellMeter_Ledger.Blows = blows
+			end
+			blows[target] = key
+		end
+	end
+	return true
+end
+
+function AZSSpellMeter_Ledger.ReadHits()
+	if not AZS_GetCombatTextEvents then
+		return false
+	end
+	local n = 0
+	while n < 8 do
+		n = n + 1
+		local pack = AZS_GetCombatTextEvents(AZSSpellMeter_Ledger.HitCursor, 32)
+		if type(pack) ~= "table" or pack.apiVersion ~= 1 then
+			if AZSSpellMeter_Ledger.HitLive then
+				return true
+			end
+			return false
+		end
+		if pack.streamId and AZSSpellMeter_Ledger.HitStream and pack.streamId ~= AZSSpellMeter_Ledger.HitStream then
+			AZSSpellMeter_Ledger.HitCursor = nil
+			AZSSpellMeter_Ledger.HitStream = nil
+			AZSSpellMeter_Ledger.HitSeen = nil
+		else
+			AZSSpellMeter_Ledger.HitStream = pack.streamId
+			local events = pack.events
+			if type(events) == "table" then
+				local i
+				for i = 1, table.getn(events) do
+					if AZSSpellMeter_Ledger.TakeHit(events[i]) then
+						AZSSpellMeter_Ledger.HitLive = true
+					end
+				end
+			end
+			if pack.cursor and pack.cursor ~= "" then
+				AZSSpellMeter_Ledger.HitCursor = pack.cursor
+			end
+			if not pack.hasMore then
+				break
+			end
+		end
+	end
+	return true
 end

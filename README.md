@@ -44,6 +44,16 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ## Changelog
 
+### 1.39
+
+For game 0.139.0. Older builds keep the combat log.
+
+- Hits, crits, and biggest hits follow the meter line the game puts on each combat-text number. A pet or summon hit stays on that pet. A strike that floats as another spell, such as Shadow Weaving on Shadow Word: Pain, stays on the spell the meter names.
+- A kill still comes from the death message. It is credited to the last meter line that hit that enemy.
+- Boss hits, crits, and kills stay limited to the current boss fight.
+- A minion's spells keep a steady hit, crit, and kill count while the minion is expanded.
+- Damage, percent, and kills widen with their numbers, and each shrinks only after the number has stayed narrower for 10 seconds.
+
 ### 1.38.1
 
 Tested with game 0.135.1.

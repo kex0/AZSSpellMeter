@@ -708,6 +708,12 @@ local function note(spell, amount, crit, victim)
 	if player and name == player then
 		return
 	end
+	if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.HitLive then
+		if AZSSpellMeter_Ledger.CreditKill and AZSSpellMeter_Ledger.CreditKill(name) then
+			state.kills = (state.kills or 0) + 1
+		end
+		return
+	end
 	local spell = lastBlow[name]
 	if not spell then
 		return
@@ -1165,6 +1171,9 @@ local function resetData()
 	castGaps = {}
 	castHeld = false
 	lastBlow = {}
+	if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.WipeHits then
+		AZSSpellMeter_Ledger.WipeHits()
+	end
 	state.petName = nil
 	state.petIcon = nil
 	testMeter = nil
@@ -2871,6 +2880,9 @@ local function watchRun()
 		state.bossFight = nil
 		state.bossSeenTotal = nil
 		lastBlow = {}
+		if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.WipeHits then
+			AZSSpellMeter_Ledger.WipeHits()
+		end
 		state.base = nil
 		state.baseTotal = nil
 		state.baseTime = nil
@@ -3191,6 +3203,9 @@ local function windowReset(dropTest, mode)
 		state.spells = {}
 		state.kills = 0
 		lastBlow = {}
+		if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.WipeHits then
+			AZSSpellMeter_Ledger.WipeHits()
+		end
 	end
 	if viewMode() == mode then
 		scroll = 0
@@ -3520,8 +3535,10 @@ local function rebuild(mode)
 				end
 				if line.fromLedger and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ApplyCombat then
 					if mode == "boss" then
+						AZSSpellMeter_Ledger.HitBook = "boss"
 						AZSSpellMeter_Ledger.ApplyCombat(row, line, state.bossSpells or {}, englishSpell)
 					else
+						AZSSpellMeter_Ledger.HitBook = nil
 						AZSSpellMeter_Ledger.ApplyCombat(row, line, state.spells, englishSpell)
 					end
 				end
@@ -3746,6 +3763,11 @@ local function rebuild(mode)
 		meterDps = windowRate
 	end
 	if lines and lines.pendingProcs and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.FoldProcs then
+		if mode == "boss" then
+			AZSSpellMeter_Ledger.HitBook = "boss"
+		else
+			AZSSpellMeter_Ledger.HitBook = nil
+		end
 		if not (config().look and config().look.flat) then
 			AZSSpellMeter_Ledger.FoldProcs(bucket, lines.pendingProcs, englishSpell, bucketOf, PROC_CAST, state.spells)
 		else
@@ -3759,6 +3781,17 @@ local function rebuild(mode)
 					row.fromMeter = true
 					if spell.icon and not row.iconPath then
 						row.iconPath = spell.icon
+					end
+					if AZSSpellMeter_Ledger.HitLive and spell.sourceKey and AZSSpellMeter_Ledger.MeterStat then
+						local rec = AZSSpellMeter_Ledger.MeterStat(spell.sourceKey)
+						if rec then
+							row.hits = (row.hits or 0) + (rec.hits or 0)
+							row.crits = (row.crits or 0) + (rec.crits or 0)
+							row.kills = (row.kills or 0) + (rec.kills or 0)
+							if (rec.best or 0) > (row.best or 0) then
+								row.best = rec.best
+							end
+						end
 					end
 				end
 			end
@@ -4212,6 +4245,9 @@ local function noteDeath()
 			state.partyBaseTime = nil
 		end
 		lastBlow = {}
+		if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.WipeHits then
+			AZSSpellMeter_Ledger.WipeHits()
+		end
 		local gMode, graph
 		for gMode, graph in pairs(graphBoxes) do
 			graph.axisMax = nil
@@ -4582,30 +4618,6 @@ local function refreshWindow(win)
 		local function measureCol(fs, header, kind)
 			local wide = textWidth(fs, header)
 			local nums = 0
-			-- The column stays wide enough for 99999 so the digits do not jump.
-			-- The name only stops for the digits on screen, so a short count
-			-- does not cut the spell off in front of an empty slot.
-			if kind == "kills" then
-				local reserved = textWidth(fs, "99999")
-				if reserved > wide then
-					wide = reserved
-				end
-				local live = 0
-				local ki
-				for ki = 1, n do
-					local entry = sorted[ki]
-					if entry and not entry.child and (entry.kills or 0) > 0 then
-						local kw = textWidth(fs, tostring(entry.kills))
-						if kw > live then
-							live = kw
-						end
-					end
-				end
-				if live < 8 then
-					live = 8
-				end
-				return wide + 4, live + 2
-			end
 			local i
 			for i = 1, n do
 				local entry = sorted[i]
@@ -4621,7 +4633,7 @@ local function refreshWindow(win)
 				elseif kind == "damage" then
 					sample = comma(entry.damage or 0)
 				elseif kind == "kills" then
-					if not entry.child and (entry.kills or 0) > 0 then
+					if not entry.ownSpell and not entry.noKill and (entry.kills or 0) > 0 then
 						sample = tostring(entry.kills)
 					end
 				end
@@ -4817,11 +4829,7 @@ local function refreshWindow(win)
 	local pi
 	local pn = table.getn(parts)
 	for pi = 1, pn do
-		local use = parts[pi].slot
-		if pi == pn then
-			use = parts[pi].num
-		end
-		numW = numW + use
+		numW = numW + parts[pi].slot
 		if pi < pn then
 			numW = numW + 6
 		else
@@ -11865,6 +11873,9 @@ local function onCombat(kind)
 	if AZSSpellMeter_TouchBoss then
 		AZSSpellMeter_TouchBoss()
 	end
+	if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.HitLive then
+		return
+	end
 	ingest(arg1, kind)
 end
 
@@ -11999,6 +12010,21 @@ driver:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_PARTY_HITS")
 driver:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS")
 driver:SetScript("OnEvent", onEvent)
 driver:SetScript("OnUpdate", function()
+	if state and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ReadHits then
+		if state.bossFight then
+			AZSSpellMeter_Ledger.BossUp = true
+		else
+			AZSSpellMeter_Ledger.BossUp = nil
+		end
+		if AZSSpellMeter_Ledger.ReadHits() then
+			if AZSSpellMeter_Ledger.BestHit and AZSSpellMeter_Ledger.BestHit > (state.best or 0) then
+				state.best = AZSSpellMeter_Ledger.BestHit
+			end
+			if state.bossFight and AZSSpellMeter_Ledger.BossBest and AZSSpellMeter_Ledger.BossBest > (state.bossBest or 0) then
+				state.bossBest = AZSSpellMeter_Ledger.BossBest
+			end
+		end
+	end
 	driver.tick = (driver.tick or 0) + (arg1 or 0)
 	if driver.tick < 0.2 then
 		return
