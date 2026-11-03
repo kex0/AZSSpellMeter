@@ -332,6 +332,15 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 			end
 		end
 		takeAll(line.sourceKeys, line.sourceKey, row)
+		if (row.hits or 0) == 0 and (row.kills or 0) == 0 and (row.best or 0) == 0 and row.name and AZSSpellMeter_Ledger.MeterByName then
+			local named = AZSSpellMeter_Ledger.MeterByName(row.name)
+			if named then
+				row.hits = named.hits or 0
+				row.crits = named.crits or 0
+				row.kills = named.kills or 0
+				row.best = named.best or 0
+			end
+		end
 		if row.procs then
 			local pi
 			for pi = 1, table.getn(row.procs) do
@@ -954,6 +963,7 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 					parent.own = parent.damage or 0
 					parent.ownDps = parent.dps or 0
 					parent.ownKills = parent.kills or 0
+					parent.ownBest = parent.best or 0
 				end
 				parent.damage = (parent.damage or 0) + partDmg
 				parent.dps = (parent.dps or 0) + partRate
@@ -983,14 +993,16 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 						if spell.sourceKey and spell.sourceKey ~= have.sourceKey and AZSSpellMeter_Ledger.HitLive then
 							local extra = AZSSpellMeter_Ledger.MeterStat(spell.sourceKey)
 							if extra then
-								have.hits = (have.hits or 0) + (extra.hits or 0)
-								have.crits = (have.crits or 0) + (extra.crits or 0)
-								have.kills = (have.kills or 0) + (extra.kills or 0)
-								if pi == 1 then
-									parent.kills = (parent.kills or 0) + (extra.kills or 0)
-								end
+								local extraKills = AZSSpellMeter_Ledger.ShareCount(extra.kills, pi, pc)
+								have.hits = (have.hits or 0) + AZSSpellMeter_Ledger.ShareCount(extra.hits, pi, pc)
+								have.crits = (have.crits or 0) + AZSSpellMeter_Ledger.ShareCount(extra.crits, pi, pc)
+								have.kills = (have.kills or 0) + extraKills
+								parent.kills = (parent.kills or 0) + extraKills
 								if (extra.best or 0) > (have.best or 0) then
 									have.best = extra.best
+								end
+								if (extra.best or 0) > (parent.best or 0) then
+									parent.best = extra.best
 								end
 							end
 						end
@@ -1011,20 +1023,23 @@ function AZSSpellMeter_Ledger.FoldProcs(bucket, pending, toEnglish, bucketOf, ca
 									rec = named
 								end
 							end
-						elseif spells and pi == 1 then
+						elseif spells then
 							rec = spells[spell.name]
 							if not rec and toEnglish then
 								rec = spells[toEnglish(spell.name)]
 							end
 						end
 						if rec then
-							hits = rec.hits or 0
-							crits = rec.crits or 0
-							kills = rec.kills or 0
+							hits = AZSSpellMeter_Ledger.ShareCount(rec.hits, pi, pc)
+							crits = AZSSpellMeter_Ledger.ShareCount(rec.crits, pi, pc)
+							kills = AZSSpellMeter_Ledger.ShareCount(rec.kills, pi, pc)
 							best = rec.best or 0
 						end
-						if pi == 1 and kills > 0 then
+						if kills > 0 then
 							parent.kills = (parent.kills or 0) + kills
+						end
+						if best > (parent.best or 0) then
+							parent.best = best
 						end
 						local slot = 1
 						while parent.procs[slot] do
@@ -1594,6 +1609,19 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 	end
 	AZSSpellMeter_Ledger.Snap = { key = key, at = now, lines = lines, total = totalAmount, rate = totalRate }
 	return lines, totalAmount, totalRate
+end
+
+-- One proc shared by several spells. The last parent keeps the remainder.
+function AZSSpellMeter_Ledger.ShareCount(total, index, count)
+	total = total or 0
+	if not count or count <= 1 or not index then
+		return total
+	end
+	local part = math.floor(total / count)
+	if index == count then
+		part = total - part * (count - 1)
+	end
+	return part
 end
 
 function AZSSpellMeter_Ledger.MeterStat(key)

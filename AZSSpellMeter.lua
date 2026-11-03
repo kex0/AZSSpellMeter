@@ -27,9 +27,9 @@ local K = {
 	HEADER = 51,
 	BOTTOM = 8,
 	COL_KILL = 40,
-	COL_DMG = 50,
-	COL_PCT = 40,
-	COL_DPS = 36,
+	COL_DMG = 56,
+	COL_PCT = 32,
+	COL_DPS = 32,
 	DETACH_H = 35,
 	TRAIL = 6,
 	CLASS_SHEET = "Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Classes",
@@ -1279,6 +1279,7 @@ local PROC_CAST = {
 	["Hallowed Ground"] = { "Consecration" },
 	["Divine Intervention"] = { "Consecration" },
 	["The Art of War"] = { "Exorcism" },
+	["Righteous Hammer"] = { "Hammer of Wrath" },
 	["Presence of Mind"] = { "Arcane Missiles" },
 	["Seal of Command"] = { "Judgement" },
 	["Divine Storm"] = { "Exorcism" },
@@ -3316,7 +3317,13 @@ local function columnOn(key)
 end
 
 local function activeSort(mode)
+	if not mode then
+		mode = viewMode()
+	end
 	local key = config().sort or "damage"
+	if key == "crit" then
+		key = "damage"
+	end
 	if key == "name" or (key == "kills" and not showsKills(mode)) or not columnOn(key) then
 		key = "damage"
 	end
@@ -3909,22 +3916,20 @@ local function rebuild(mode)
 					parent.own = parent.damage or 0
 					parent.ownDps = parent.dps or 0
 					parent.ownKills = parent.kills or 0
+					parent.ownBest = parent.best or 0
 				end
 				parent.damage = (parent.damage or 0) + partDmg
 				parent.dps = (parent.dps or 0) + partRate
-				if pi == 1 then
-					parent.kills = (parent.kills or 0) + kills
+				parent.kills = (parent.kills or 0) + AZSSpellMeter_Ledger.ShareCount(kills, pi, pc)
+				if (row.best or 0) > (parent.best or 0) then
+					parent.best = row.best
 				end
-				if partDmg > 0 or (pi == 1 and showsKills(mode) and kills > 0) then
+				if partDmg > 0 or (showsKills(mode) and AZSSpellMeter_Ledger.ShareCount(kills, pi, pc) > 0) then
 					if not parent.procs then
 						parent.procs = {}
 					end
-					local phits = 0
-					local pcrits = 0
-					if pi == 1 then
-						phits = row.hits or 0
-						pcrits = row.crits or 0
-					end
+					local phits = AZSSpellMeter_Ledger.ShareCount(row.hits or 0, pi, pc)
+					local pcrits = AZSSpellMeter_Ledger.ShareCount(row.crits or 0, pi, pc)
 					-- The same talent can arrive under two languages. Keep one button.
 					local enProc = englishSpell(link.proc)
 					local have = nil
@@ -3944,8 +3949,9 @@ local function rebuild(mode)
 						have.dps = (have.dps or 0) + partRate
 						have.hits = (have.hits or 0) + phits
 						have.crits = (have.crits or 0) + pcrits
-						if pi == 1 then
-							have.kills = (have.kills or 0) + kills
+						have.kills = (have.kills or 0) + AZSSpellMeter_Ledger.ShareCount(kills, pi, pc)
+						if (row.best or 0) > (have.best or 0) then
+							have.best = row.best
 						end
 						have.proc = true
 						if not have.icon or have.icon == "" then
@@ -3960,9 +3966,10 @@ local function rebuild(mode)
 							name = link.proc,
 							damage = partDmg,
 							dps = partRate,
-							kills = (pi == 1) and kills or 0,
+							kills = AZSSpellMeter_Ledger.ShareCount(kills, pi, pc),
 							hits = phits,
 							crits = pcrits,
+							best = row.best or 0,
 							icon = procIcon,
 							proc = true,
 						}
@@ -4198,41 +4205,56 @@ local function rebuild(mode)
 				bn = bn + 1
 				built[bn] = entry
 				if open[entry.name] and entry.procs and entry.procs[1] then
+					if not AZSSpellMeter_DetailPool then
+						AZSSpellMeter_DetailPool = {}
+					end
 					if (entry.own or 0) > 0 then
 						bn = bn + 1
-						built[bn] = {
-							name = entry.name,
-							damage = entry.own or 0,
-							dps = entry.ownDps or 0,
-							kills = entry.ownKills or 0,
-							hits = entry.hits or 0,
-							crits = entry.crits or 0,
-							best = entry.best or 0,
-							iconPath = entry.iconPath,
-							child = true,
-							ownSpell = true,
-							parentName = entry.name,
-						}
+						local slot = AZSSpellMeter_DetailPool[bn]
+						if not slot then
+							slot = {}
+							AZSSpellMeter_DetailPool[bn] = slot
+						end
+						slot.name = entry.name
+						slot.damage = entry.own or 0
+						slot.dps = entry.ownDps or 0
+						slot.kills = entry.ownKills or 0
+						slot.hits = entry.hits or 0
+						slot.crits = entry.crits or 0
+						slot.best = entry.ownBest or entry.best or 0
+						slot.iconPath = entry.iconPath
+						slot.child = true
+						slot.ownSpell = true
+						slot.proc = nil
+						slot.summon = nil
+						slot.outLabel = nil
+						slot.parentName = entry.name
+						built[bn] = slot
 					end
 					local pi
 					for pi = 1, table.getn(entry.procs) do
 						local p = entry.procs[pi]
 						bn = bn + 1
-						built[bn] = {
-							name = p.name,
-							outLabel = p.countLabel,
-							damage = p.damage or 0,
-							dps = p.dps or 0,
-							kills = p.kills or 0,
-							hits = p.hits or 0,
-							crits = p.crits or 0,
-							best = p.best or 0,
-							iconPath = p.icon,
-							child = true,
-							proc = not p.summon,
-							summon = p.summon,
-							parentName = entry.name,
-						}
+						local slot = AZSSpellMeter_DetailPool[bn]
+						if not slot then
+							slot = {}
+							AZSSpellMeter_DetailPool[bn] = slot
+						end
+						slot.name = p.name
+						slot.outLabel = p.countLabel
+						slot.damage = p.damage or 0
+						slot.dps = p.dps or 0
+						slot.kills = p.kills or 0
+						slot.hits = p.hits or 0
+						slot.crits = p.crits or 0
+						slot.best = p.best or 0
+						slot.iconPath = p.icon
+						slot.child = true
+						slot.ownSpell = nil
+						slot.proc = not p.summon
+						slot.summon = p.summon
+						slot.parentName = entry.name
+						built[bn] = slot
 					end
 				end
 			end
@@ -4594,6 +4616,9 @@ local function refreshWindow(win)
 		local active = activeSort(win.fixed)
 		if win.dmgCol then
 			win.dmgCol.base = amountWord
+			if amountWord == "Damage" then
+				win.dmgCol.base = "Dmg"
+			end
 		end
 		if win.dpsCol then
 			win.dpsCol.base = rateWord
@@ -4616,16 +4641,13 @@ local function refreshWindow(win)
 			if not prevCol then
 				btn:SetPoint("RIGHT", win.cols, "RIGHT", -2, 0)
 			else
-				btn:SetPoint("RIGHT", prevCol, "LEFT", -6, 0)
+				btn:SetPoint("RIGHT", prevCol, "LEFT", -2, 0)
 			end
 			prevCol = btn
 		end
 		local rateW = K.COL_DPS
 		local shareW = K.COL_PCT
 		local dmgW = K.COL_DMG
-		if mode == "healing" then
-			dmgW = 58
-		end
 		local killW = K.COL_KILL
 		local rateNum, shareNum, dmgNum, killNum = rateW, shareW, dmgW, killW
 		local probe = listRows and listRows[1]
@@ -4636,8 +4658,20 @@ local function refreshWindow(win)
 			fs:SetText(text or "")
 			return fs:GetStringWidth() or 0
 		end
-		local function measureCol(fs, header, kind)
-			local wide = textWidth(fs, header)
+		local function measureCol(fs, headerFs, header, kind)
+			local wide = 0
+			if headerFs and headerFs.ClearAllPoints then
+				headerFs:ClearAllPoints()
+				headerFs:SetWidth(200)
+				wide = textWidth(headerFs, header)
+				headerFs:SetPoint("LEFT", headerFs:GetParent(), "LEFT", 0, 0)
+				headerFs:SetPoint("RIGHT", headerFs:GetParent(), "RIGHT", 0, 0)
+			else
+				wide = textWidth(fs, header)
+			end
+			if fs and fs.SetWidth then
+				fs:SetWidth(200)
+			end
 			local nums = 0
 			local i
 			for i = 1, n do
@@ -4672,15 +4706,15 @@ local function refreshWindow(win)
 			if nums < 8 then
 				nums = 8
 			end
-			return wide + 4, nums + 2
+			return wide + 2, nums + 1
 		end
 		if probe then
 			local now = 0
 			if GetTime then
 				now = GetTime()
 			end
-			local function take(fs, header, kind)
-				local need, num = measureCol(fs, header, kind)
+			local function take(fs, headerFs, header, kind)
+				local need, num = measureCol(fs, headerFs, header, kind)
 				local slot = holdWidth(win, mode, kind, need, now)
 				if num > slot then
 					num = slot
@@ -4688,16 +4722,16 @@ local function refreshWindow(win)
 				return slot, num
 			end
 			if showRate and probe.rate then
-				rateW, rateNum = take(probe.rate, rateWord, "rate")
+				rateW, rateNum = take(probe.rate, win.dpsCol and win.dpsCol.label, rateWord, "rate")
 			end
 			if showShare and probe.share then
-				shareW, shareNum = take(probe.share, "%", "share")
+				shareW, shareNum = take(probe.share, win.shareCol and win.shareCol.label, "%", "share")
 			end
 			if showDmg and probe.damage then
-				dmgW, dmgNum = take(probe.damage, amountWord, "damage")
+				dmgW, dmgNum = take(probe.damage, win.dmgCol and win.dmgCol.label, (win.dmgCol and win.dmgCol.base) or amountWord, "damage")
 			end
 			if showKill and probe.kills then
-				killW, killNum = take(probe.kills, "Kills", "kills")
+				killW, killNum = take(probe.kills, win.killCol and win.killCol.label, "Kills", "kills")
 			end
 		end
 		stickCol(win.dpsCol, showRate, rateW)
@@ -4850,12 +4884,7 @@ local function refreshWindow(win)
 	local pi
 	local pn = table.getn(parts)
 	for pi = 1, pn do
-		numW = numW + parts[pi].slot
-		if pi < pn then
-			numW = numW + 6
-		else
-			numW = numW + 4
-		end
+		numW = numW + parts[pi].slot + 2
 	end
 	-- Icons drawn after the name. Their width stays out of the Kills column.
 	local function trailIcons(entry)
@@ -4903,6 +4932,9 @@ local function refreshWindow(win)
 			end
 			local text = entry.outLabel or entry.name or ""
 			local fs = listRows[1].name
+			if fs.SetWidth then
+				fs:SetWidth(listW)
+			end
 			local rankGap = 0
 			if not entry.child then
 				fs:SetText(tostring(entry.rank or hi))
@@ -5023,11 +5055,16 @@ local function refreshWindow(win)
 			row.data = data
 			row:Show()
 			local rowH = rowHeights[first + i] or K.ROW_H
-			row:ClearAllPoints()
-			row:SetPoint("TOPLEFT", row:GetParent(), "TOPLEFT", 0, -rowY)
-			row:SetWidth(rowWidth(win))
-			row:SetHeight(rowH)
-			row.bar:SetHeight(rowH - 2)
+			if row.layY ~= rowY or row.layH ~= rowH or row.layW ~= rowWidth(win) then
+				row:ClearAllPoints()
+				row:SetPoint("TOPLEFT", row:GetParent(), "TOPLEFT", 0, -rowY)
+				row.layW = rowWidth(win)
+				row:SetWidth(row.layW)
+				row:SetHeight(rowH)
+				row.bar:SetHeight(rowH - 2)
+				row.layY = rowY
+				row.layH = rowH
+			end
 			rowY = rowY + rowH
 			local classCoord = nil
 			if data.classKey then
@@ -5081,25 +5118,40 @@ local function refreshWindow(win)
 				nameLeft = 28
 				iconLeft = 13
 			end
-			if row.arrow then
-				row.arrow:ClearAllPoints()
-				if data.shown then
-					row.arrow:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -1)
-				else
-					row.arrow:SetPoint("LEFT", row, "LEFT", 0, 0)
+			row.laySame = row.lRate == rateW and row.lShare == shareW and row.lDmg == dmgW and row.lKill == killW and row.lSR == showRate and row.lSS == showShare and row.lSD == showDmg and row.lSK == showKill and row.lChild == data.child and row.lShown == data.shown and row.lNL == nameLeft and row.lIL == iconLeft
+			if not row.laySame then
+				row.lRate, row.lShare, row.lDmg, row.lKill = rateW, shareW, dmgW, killW
+				row.lSR, row.lSS, row.lSD, row.lSK = showRate, showShare, showDmg, showKill
+				row.lChild, row.lShown, row.lNL, row.lIL = data.child, data.shown, nameLeft, iconLeft
+				if row.arrow then
+					row.arrow:ClearAllPoints()
+					if data.shown then
+						row.arrow:SetPoint("TOPLEFT", row, "TOPLEFT", 0, -1)
+					else
+						row.arrow:SetPoint("LEFT", row, "LEFT", 0, 0)
+					end
 				end
-			end
-			if row.iconBg then
-				row.iconBg:ClearAllPoints()
-				if data.shown then
-					row.iconBg:SetPoint("TOPLEFT", row, "TOPLEFT", iconLeft, -1)
-				else
-					row.iconBg:SetPoint("LEFT", row, "LEFT", iconLeft, 0)
+				if row.iconBg then
+					row.iconBg:ClearAllPoints()
+					if data.shown then
+						row.iconBg:SetPoint("TOPLEFT", row, "TOPLEFT", iconLeft, -1)
+					else
+						row.iconBg:SetPoint("LEFT", row, "LEFT", iconLeft, 0)
+					end
 				end
 			end
 			local leftNum = nil
 			local function stickText(fs, on, colW)
 				if not fs then
+					return
+				end
+				if row.laySame then
+					if on then
+						fs:Show()
+						fs:SetWidth(colW)
+					else
+						fs:Hide()
+					end
 					return
 				end
 				fs:ClearAllPoints()
@@ -5114,12 +5166,12 @@ local function refreshWindow(win)
 					if not leftNum then
 						fs:SetPoint("TOPRIGHT", row, "TOPRIGHT", -2, -1)
 					else
-						fs:SetPoint("TOPRIGHT", leftNum, "TOPLEFT", -6, 0)
+						fs:SetPoint("TOPRIGHT", leftNum, "TOPLEFT", -2, 0)
 					end
 				elseif not leftNum then
 					fs:SetPoint("RIGHT", row, "RIGHT", -2, 0)
 				else
-					fs:SetPoint("RIGHT", leftNum, "LEFT", -6, 0)
+					fs:SetPoint("RIGHT", leftNum, "LEFT", -2, 0)
 				end
 				leftNum = fs
 			end
@@ -5135,11 +5187,16 @@ local function refreshWindow(win)
 			stickText(row.kills, showKill and (not data.child or (data.kills or 0) > 0), killW)
 			local rankGap = 0
 			if row.rank then
-				row.rank:ClearAllPoints()
 				if data.child then
-					row.rank:Hide()
-					row.rank:SetText("")
+					if row.rankOn then
+						row.rank:Hide()
+						row.rank:SetText("")
+						row.rankOn = nil
+					end
+				elseif row.rankOn == (data.rank or (first + i)) and row.rankLeft == nameLeft and row.rankShown == data.shown then
+					rankGap = row.rankGap or 0
 				else
+					row.rank:ClearAllPoints()
 					row.rank:SetText(tostring(data.rank or (first + i)))
 					row.rank:Show()
 					if data.shown then
@@ -5147,9 +5204,14 @@ local function refreshWindow(win)
 					else
 						row.rank:SetPoint("LEFT", row, "LEFT", nameLeft, 0)
 					end
+					rankGap = 0
 					if row.rank.GetStringWidth then
 						rankGap = (row.rank:GetStringWidth() or 0) + 6
 					end
+					row.rankOn = data.rank or (first + i)
+					row.rankLeft = nameLeft
+					row.rankShown = data.shown
+					row.rankGap = rankGap
 				end
 			end
 			local ICON_W = 12
@@ -5234,22 +5296,37 @@ local function refreshWindow(win)
 			end
 			-- A width left over from a shorter window reports the cut-off
 			-- text. Measure the whole name, then stop at the numbers.
-			if row.name.SetWidth then
-				row.name:SetWidth(rowW)
-			end
 			local textW = 0
-			if row.name.GetStringWidth then
-				textW = row.name:GetStringWidth() or 0
-			end
-			if textW < 1 or textW > room then
-				textW = room
-			end
-			row.name:ClearAllPoints()
-			if data.shown then
-				row.name:SetPoint("TOPLEFT", row, "TOPLEFT", nameX, -1)
+			if row.mLabel == label and row.mShown == data.shown and row.mRoom == room and row.mW then
+				textW = row.mW
 			else
-				row.name:SetPoint("LEFT", row, "LEFT", nameX, 0)
+				if row.name.SetWidth then
+					row.name:SetWidth(rowW)
+				end
+				if row.name.GetStringWidth then
+					textW = row.name:GetStringWidth() or 0
+				end
+				if textW < 1 or textW > room then
+					textW = room
+				end
+				row.mLabel = label
+				row.mShown = data.shown
+				row.mRoom = room
+				row.mW = textW
 			end
+			if row.nX ~= nameX or row.tW ~= textW or row.nShown ~= data.shown then
+				row.name:ClearAllPoints()
+				if data.shown then
+					row.name:SetPoint("TOPLEFT", row, "TOPLEFT", nameX, -1)
+				else
+					row.name:SetPoint("LEFT", row, "LEFT", nameX, 0)
+				end
+				row.nX = nameX
+				row.tW = textW
+				row.nShown = data.shown
+			end
+			-- Measuring sets the width to the whole row. Put the fitted width back
+			-- even when the cached size has not changed.
 			row.name:SetWidth(textW)
 			local fill = share
 			local fillTopOn = LOOK.fillTop
@@ -5362,7 +5439,7 @@ local function refreshWindow(win)
 			end
 			while slot <= K.TRAIL do
 				local btn = row.procBtns and row.procBtns[slot]
-				if btn then
+				if btn and btn:IsShown() then
 					btn.info = nil
 					btn.stack = nil
 					if btn.badge then
@@ -9056,8 +9133,8 @@ local function createRow(parent, index)
 	row.share = share
 
 	rate:SetPoint("RIGHT", row, "RIGHT", -2, 0)
-	damage:SetPoint("RIGHT", rate, "LEFT", -6, 0)
-	kills:SetPoint("RIGHT", damage, "LEFT", -6, 0)
+	damage:SetPoint("RIGHT", rate, "LEFT", -2, 0)
+	kills:SetPoint("RIGHT", damage, "LEFT", -2, 0)
 	name:SetPoint("RIGHT", kills, "LEFT", -4, 0)
 
 	local function upgradeRank(name)
@@ -9128,9 +9205,6 @@ local function createRow(parent, index)
 				table.insert(lines, { string.format("Kills %d", data.kills or 0), 1, 0.82, 0.45 })
 			end
 			local showBest = (data.best or 0) > 0 and table.getn(lines) < 12
-			if showBest and data.child and not data.summon then
-				showBest = false
-			end
 			if showBest then
 				local bestLine = "Biggest crit " .. comma(data.best)
 				if data.bestWho and data.bestWho ~= "" then
@@ -9897,11 +9971,11 @@ createDetached = function(mode)
 	local dpsCol = makeSortButton("dps", "DPS", K.COL_DPS, "RIGHT")
 	dpsCol:SetPoint("RIGHT", cols, "RIGHT", -2, 0)
 	local shareCol = makeSortButton("share", "%", K.COL_PCT, "RIGHT")
-	shareCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
-	local dmgCol = makeSortButton("damage", "Damage", K.COL_DMG, "RIGHT")
-	dmgCol:SetPoint("RIGHT", shareCol, "LEFT", -6, 0)
+	shareCol:SetPoint("RIGHT", dpsCol, "LEFT", -2, 0)
+	local dmgCol = makeSortButton("damage", "Dmg", K.COL_DMG, "RIGHT")
+	dmgCol:SetPoint("RIGHT", shareCol, "LEFT", -2, 0)
 	local killCol = makeSortButton("kills", "Kills", K.COL_KILL, "RIGHT")
-	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -6, 0)
+	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -2, 0)
 	win.dpsCol = dpsCol
 	win.shareCol = shareCol
 	win.dmgCol = dmgCol
@@ -11621,11 +11695,11 @@ local function buildMainChrome()
 	local dpsCol = makeSortButton("dps", "DPS", K.COL_DPS, "RIGHT")
 	dpsCol:SetPoint("RIGHT", cols, "RIGHT", -2, 0)
 	local shareCol = makeSortButton("share", "%", K.COL_PCT, "RIGHT")
-	shareCol:SetPoint("RIGHT", dpsCol, "LEFT", -6, 0)
-	local dmgCol = makeSortButton("damage", "Damage", K.COL_DMG, "RIGHT")
-	dmgCol:SetPoint("RIGHT", shareCol, "LEFT", -6, 0)
+	shareCol:SetPoint("RIGHT", dpsCol, "LEFT", -2, 0)
+	local dmgCol = makeSortButton("damage", "Dmg", K.COL_DMG, "RIGHT")
+	dmgCol:SetPoint("RIGHT", shareCol, "LEFT", -2, 0)
 	local killCol = makeSortButton("kills", "Kills", K.COL_KILL, "RIGHT")
-	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -6, 0)
+	killCol:SetPoint("RIGHT", dmgCol, "LEFT", -2, 0)
 	frame.dpsCol = dpsCol
 	frame.shareCol = shareCol
 	frame.dmgCol = dmgCol

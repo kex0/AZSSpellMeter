@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.39.2
+
+- Lightning Overload's kills are shared by Lightning Bolt and Chain Lightning, the same way its damage is.
+- Righteous Hammer is grouped under Hammer of Wrath.
+- Hover a spell to see its biggest crit, including a talent opened under that spell.
+- Opening a spell's talents keeps those rows and leaves their layout in place, so the list does less work on each refresh.
+- The columns sit closer together. The Damage column is labeled Dmg.
+
 ## 1.39.1
 
 - A grouped spell shows its kills on the main skill, and each of a minion's attacks keeps the kills from that attack. Felseeker keeps the kills the log records as Searing Pain. Shadow Bolt on a Doomguard stays separate from yours.
