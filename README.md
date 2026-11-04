@@ -44,6 +44,12 @@ The window position is remembered across updates. Deleting the addon folder does
 
 ## Changelog
 
+### 1.39.3
+
+- Totems each stay on their own row. They are no longer grouped together as pets.
+- Searing Totem shows the kills from its shots. Magma Totem's kills stay on one number.
+- The row numbers stay visible beside the spell name.
+
 ### 1.39.2
 
 - Lightning Overload's kills are shared by Lightning Bolt and Chain Lightning, the same way its damage is.

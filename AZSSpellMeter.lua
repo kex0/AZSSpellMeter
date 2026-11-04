@@ -4031,7 +4031,7 @@ local function rebuild(mode)
 		-- Being out is not a contribution. Healing, Boss, and Taken stay empty
 		-- until that summon added to the number this view tracks.
 		local contributed = (summonRow.damage or 0) > 0 or (showsKills(mode) and (summonRow.kills or 0) > 0)
-		if contributed and (summonKey[summonEn] or summonKey[summonName] or summonRow.actorPack) then
+		if contributed and summonRow.actorPack ~= "totem" and (summonKey[summonEn] or summonKey[summonName] or summonRow.actorPack) then
 			memberCount = memberCount + 1
 			members[memberCount] = summonName
 			if summonRow.actorPack == "minion" or warlockSummon[summonEn] or warlockSummon[summonName] then
@@ -5193,9 +5193,9 @@ local function refreshWindow(win)
 						row.rank:SetText("")
 						row.rankOn = nil
 					end
-				elseif row.rankOn == (data.rank or (first + i)) and row.rankLeft == nameLeft and row.rankShown == data.shown then
-					rankGap = row.rankGap or 0
 				else
+					-- Measure every refresh. A cached width of 0 left the name
+					-- on top of the number, so only a few rows showed one.
 					row.rank:ClearAllPoints()
 					row.rank:SetText(tostring(data.rank or (first + i)))
 					row.rank:Show()
@@ -5204,9 +5204,9 @@ local function refreshWindow(win)
 					else
 						row.rank:SetPoint("LEFT", row, "LEFT", nameLeft, 0)
 					end
-					rankGap = 0
-					if row.rank.GetStringWidth then
-						rankGap = (row.rank:GetStringWidth() or 0) + 6
+					rankGap = string.len(tostring(data.rank or (first + i))) * 7 + 6
+					if row.rank.GetStringWidth and (row.rank:GetStringWidth() or 0) > 1 then
+						rankGap = row.rank:GetStringWidth() + 6
 					end
 					row.rankOn = data.rank or (first + i)
 					row.rankLeft = nameLeft
@@ -5484,6 +5484,7 @@ local function refreshWindow(win)
 			row:Hide()
 			if row.rank then
 				row.rank:Hide()
+				row.rankOn = nil
 			end
 			if row.arrow then
 				row.arrow:Hide()
@@ -9091,6 +9092,10 @@ local function createRow(parent, index)
 	rank:SetJustifyH("LEFT")
 	face(rank, 10)
 	rank:SetTextColor(1, 0.95, 0.86)
+	if rank.SetShadowColor then
+		rank:SetShadowColor(0, 0, 0, 1)
+		rank:SetShadowOffset(1, -1)
+	end
 	rank:Hide()
 	row.rank = rank
 

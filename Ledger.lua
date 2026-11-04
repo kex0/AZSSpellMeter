@@ -258,6 +258,333 @@ function AZSSpellMeter_Ledger.RestoreRates(bucket)
 	end
 end
 
+function AZSSpellMeter_Ledger.CopyProcs(list)
+	local copy = {}
+	if not list then
+		return copy
+	end
+	local i
+	for i = 1, table.getn(list) do
+		copy[i] = list[i]
+	end
+	return copy
+end
+
+function AZSSpellMeter_Ledger.AddKey(btn, key)
+	if not btn or not key or key == "" then
+		return
+	end
+	if not btn.sourceKey or btn.sourceKey == "" then
+		btn.sourceKey = key
+		return
+	end
+	if btn.sourceKey == key then
+		return
+	end
+	if not btn.sourceKeys then
+		btn.sourceKeys = { btn.sourceKey }
+	end
+	local i
+	for i = 1, table.getn(btn.sourceKeys) do
+		if btn.sourceKeys[i] == key then
+			return
+		end
+	end
+	btn.sourceKeys[table.getn(btn.sourceKeys) + 1] = key
+end
+
+-- Killing blows for a totem sit on the totem's name, often on a different
+-- meter key than the pulses. Add those records once. counted remembers keys
+-- already poured onto the row, so the same kill cannot land twice.
+function AZSSpellMeter_Ledger.TakeNamed(into, also, name, who, counted)
+	if not into or not name or name == "" then
+		return
+	end
+	local book = AZSSpellMeter_Ledger.Hits
+	if AZSSpellMeter_Ledger.HitBook == "boss" then
+		book = AZSSpellMeter_Ledger.BossHits
+	end
+	if not book then
+		return
+	end
+	if not counted then
+		counted = {}
+	end
+	local key, rec
+	for key, rec in pairs(book) do
+		if rec and rec.spell == name and not counted[key] then
+			local ok = true
+			if who and who ~= "" and rec.who ~= who then
+				ok = false
+			end
+			if ok then
+				counted[key] = true
+				into.hits = (into.hits or 0) + (rec.hits or 0)
+				into.crits = (into.crits or 0) + (rec.crits or 0)
+				into.kills = (into.kills or 0) + (rec.kills or 0)
+				if (rec.best or 0) > (into.best or 0) then
+					into.best = rec.best
+				end
+				if also then
+					also.hits = (also.hits or 0) + (rec.hits or 0)
+					also.crits = (also.crits or 0) + (rec.crits or 0)
+					also.kills = (also.kills or 0) + (rec.kills or 0)
+					if (rec.best or 0) > (also.best or 0) then
+						also.best = rec.best
+					end
+				end
+			end
+		end
+	end
+end
+
+function AZSSpellMeter_Ledger.ApplyHits(row, line)
+	local pass = AZSSpellMeter_Ledger.HitPass
+	local seen = {}
+	local function take(key, into)
+		if not key or key == "" or not into or seen[key] then
+			return
+		end
+		seen[key] = true
+		-- A minion's spell button is kept with the meter line and painted
+		-- again on the next refresh. Start this pass from the meter's
+		-- count, or the same hits and kills pile on every frame.
+		if into.hitPass ~= pass then
+			into.hitPass = pass
+			into.hits = 0
+			into.crits = 0
+			into.kills = 0
+			into.best = 0
+		end
+		local rec = AZSSpellMeter_Ledger.MeterStat(key)
+		if not rec then
+			return
+		end
+		into.hits = (into.hits or 0) + (rec.hits or 0)
+		into.crits = (into.crits or 0) + (rec.crits or 0)
+		into.kills = (into.kills or 0) + (rec.kills or 0)
+		if (rec.best or 0) > (into.best or 0) then
+			into.best = rec.best
+		end
+	end
+	local function takeAll(keys, one, into)
+		if keys then
+			local i
+			for i = 1, table.getn(keys) do
+				take(keys[i], into)
+			end
+		else
+			take(one, into)
+		end
+	end
+	local function eachKey(keys, one, fn)
+		if keys then
+			local i
+			for i = 1, table.getn(keys) do
+				fn(keys[i])
+			end
+		else
+			fn(one)
+		end
+	end
+	-- A totem row has no source key of its own. The combat-log seed would
+	-- otherwise sit there until a button wiped it, and the wipe is what made
+	-- the kill number jump. Start from the hit book.
+	if line.actorPack then
+		row.hitPass = pass
+		row.hits = 0
+		row.crits = 0
+		row.kills = 0
+		row.best = 0
+	end
+	takeAll(line.sourceKeys, line.sourceKey, row)
+	local counted = {}
+	if line.actorPack then
+		eachKey(line.sourceKeys, line.sourceKey, function(key)
+			if key and key ~= "" then
+				counted[key] = true
+			end
+		end)
+	elseif row.name and AZSSpellMeter_Ledger.MeterByName and ((row.hits or 0) == 0 and (row.kills or 0) == 0 and (row.best or 0) == 0) then
+		local named = AZSSpellMeter_Ledger.MeterByName(row.name)
+		if named then
+			row.hits = named.hits or 0
+			row.crits = named.crits or 0
+			row.kills = named.kills or 0
+			row.best = named.best or 0
+		end
+	elseif row.name and AZSSpellMeter_Ledger.MeterByName and (row.kills or 0) == 0 then
+		local named = AZSSpellMeter_Ledger.MeterByName(row.name)
+		if named and (named.kills or 0) > 0 then
+			row.kills = named.kills
+			if (named.best or 0) > (row.best or 0) then
+				row.best = named.best
+			end
+		end
+	end
+	if row.procs then
+		local pi
+		for pi = 1, table.getn(row.procs) do
+			local proc = row.procs[pi]
+			if proc and not proc.summon then
+				seen = {}
+				takeAll(proc.sourceKeys, proc.sourceKey, proc)
+				if line.actorPack then
+					eachKey(proc.sourceKeys, proc.sourceKey, function(key)
+						if not key or key == "" or counted[key] then
+							return
+						end
+						counted[key] = true
+						local rec = AZSSpellMeter_Ledger.MeterStat(key)
+						if not rec then
+							return
+						end
+						row.hits = (row.hits or 0) + (rec.hits or 0)
+						row.crits = (row.crits or 0) + (rec.crits or 0)
+						row.kills = (row.kills or 0) + (rec.kills or 0)
+						if (rec.best or 0) > (row.best or 0) then
+							row.best = rec.best
+						end
+					end)
+				end
+				if (proc.kills or 0) == 0 and proc.name then
+					local who = proc.actorId
+					local actors = AZSSpellMeter_Ledger.SpellActors
+					local info = actors and actors[proc.name]
+					if info and info.hero and (not who or who == "") then
+						who = "\031"
+					end
+					if line.actorPack then
+						AZSSpellMeter_Ledger.TakeNamed(proc, row, proc.name, who, counted)
+					elseif AZSSpellMeter_Ledger.MeterByName then
+						local named = AZSSpellMeter_Ledger.MeterByName(proc.name, who)
+						if named then
+							if (proc.hits or 0) == 0 and (proc.best or 0) == 0 then
+								proc.hits = named.hits or 0
+								proc.crits = named.crits or 0
+								proc.best = named.best or 0
+							end
+							if (named.kills or 0) > 0 then
+								proc.kills = named.kills
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	if line.actorPack and row.name then
+		AZSSpellMeter_Ledger.TakeNamed(row, nil, row.name, nil, counted)
+	end
+end
+
+-- Combat-log kills for one minion or totem spell. A totem's shots are often
+-- logged as Attack. That record belongs here only when this actor is the one
+-- that casts it, so a hero's Shadow Bolt is not copied onto a Doomguard.
+function AZSSpellMeter_Ledger.ActorLog(spells, rowName, procName, toEnglish)
+	if not spells or not procName or procName == "" then
+		return nil
+	end
+	local rec = nil
+	if rowName and rowName ~= "" then
+		rec = spells[rowName .. "\031" .. procName]
+		if not rec and toEnglish then
+			rec = spells[rowName .. "\031" .. (toEnglish(procName) or procName)]
+		end
+	end
+	if not rec and AZSSpellMeter_LogSpell then
+		local alias = AZSSpellMeter_LogSpell[procName]
+		if not alias and toEnglish then
+			alias = AZSSpellMeter_LogSpell[toEnglish(procName)]
+		end
+		if alias and rowName and rowName ~= "" then
+			rec = spells[rowName .. "\031" .. alias]
+		end
+	end
+	if not rec and AZSSpellMeter_Ledger.HitOwner then
+		local owner = AZSSpellMeter_Ledger.HitOwner(procName)
+		if not owner and toEnglish then
+			owner = AZSSpellMeter_Ledger.HitOwner(toEnglish(procName))
+		end
+		if owner and rowName and (owner == rowName or (toEnglish and toEnglish(owner) == toEnglish(rowName))) then
+			rec = spells[procName]
+			if not rec and toEnglish then
+				rec = spells[toEnglish(procName)]
+			end
+		end
+	end
+	return rec
+end
+
+-- The row already has kills stored under its own name. Add a button's kills
+-- only when they are a different record, and put that number on the button.
+-- A totem's shots are logged as "Searing Totem's Attack" or as plain Attack.
+function AZSSpellMeter_Ledger.FillActorKills(row, line, spells, toEnglish)
+	if not row or not spells or not row.name then
+		return
+	end
+	local own = spells[row.name]
+	if not own and toEnglish then
+		own = spells[toEnglish(row.name)]
+	end
+	local total = 0
+	if own then
+		total = own.kills or 0
+	end
+	local used = {}
+	if own then
+		used[own] = true
+	end
+	local function takeRec(rec)
+		if not rec or used[rec] then
+			return
+		end
+		used[rec] = true
+		total = total + (rec.kills or 0)
+	end
+	if row.procs then
+		local i
+		for i = 1, table.getn(row.procs) do
+			local proc = row.procs[i]
+			if proc and proc.name and proc.name ~= "" and not proc.summon then
+				local rec = AZSSpellMeter_Ledger.ActorLog(spells, row.name, proc.name, toEnglish)
+				if rec and (proc.kills or 0) == 0 then
+					proc.kills = rec.kills or 0
+				end
+				takeRec(rec)
+			end
+		end
+	end
+	local function takeKey(key)
+		if key and key ~= "" then
+			takeRec(spells[key])
+		end
+	end
+	takeKey(row.name .. "\031Attack")
+	takeKey(row.name .. "\031Melee")
+	if toEnglish then
+		local en = toEnglish(row.name)
+		if en and en ~= row.name then
+			takeKey(en .. "\031Attack")
+			takeKey(en .. "\031Melee")
+		end
+	end
+	local enName = row.name
+	if toEnglish then
+		enName = toEnglish(row.name) or row.name
+	end
+	if enName == "Searing Totem" then
+		local actors = AZSSpellMeter_Ledger.SpellActors
+		local info = actors and actors["Attack"]
+		if not info or not info.hero then
+			takeKey("Attack")
+		end
+	end
+	if total > (row.kills or 0) then
+		row.kills = total
+	end
+end
+
 function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 	if not row or not line or not spells then
 		return
@@ -286,102 +613,18 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 		end
 	end
 	if line.procs then
-		row.procs = line.procs
+		-- Folding a proc appends a button. A copied list keeps that off the
+		-- cached meter line, so the next refresh does not count it twice.
+		row.procs = AZSSpellMeter_Ledger.CopyProcs(line.procs)
 	end
 	if line.sourceKey and line.sourceKey ~= "" then
 		row.sourceKey = line.sourceKey
 	end
 	if AZSSpellMeter_Ledger.HitLive then
 		AZSSpellMeter_Ledger.HitPass = (AZSSpellMeter_Ledger.HitPass or 0) + 1
-		local pass = AZSSpellMeter_Ledger.HitPass
-		local seen = {}
-		local function take(key, into)
-			if not key or key == "" or not into or seen[key] then
-				return
-			end
-			seen[key] = true
-			-- A minion's spell button is kept with the meter line and painted
-			-- again on the next refresh. Start this pass from the meter's
-			-- count, or the same hits and kills pile on every frame.
-			if into.hitPass ~= pass then
-				into.hitPass = pass
-				into.hits = 0
-				into.crits = 0
-				into.kills = 0
-				into.best = 0
-			end
-			local rec = AZSSpellMeter_Ledger.MeterStat(key)
-			if not rec then
-				return
-			end
-			into.hits = (into.hits or 0) + (rec.hits or 0)
-			into.crits = (into.crits or 0) + (rec.crits or 0)
-			into.kills = (into.kills or 0) + (rec.kills or 0)
-			if (rec.best or 0) > (into.best or 0) then
-				into.best = rec.best
-			end
-		end
-		local function takeAll(keys, one, into)
-			if keys then
-				local i
-				for i = 1, table.getn(keys) do
-					take(keys[i], into)
-				end
-			else
-				take(one, into)
-			end
-		end
-		takeAll(line.sourceKeys, line.sourceKey, row)
-		if (row.hits or 0) == 0 and (row.kills or 0) == 0 and (row.best or 0) == 0 and row.name and AZSSpellMeter_Ledger.MeterByName then
-			local named = AZSSpellMeter_Ledger.MeterByName(row.name)
-			if named then
-				row.hits = named.hits or 0
-				row.crits = named.crits or 0
-				row.kills = named.kills or 0
-				row.best = named.best or 0
-			end
-		end
-		if row.procs then
-			local pi
-			for pi = 1, table.getn(row.procs) do
-				local proc = row.procs[pi]
-				if proc and not proc.summon then
-					seen = {}
-					takeAll(proc.sourceKeys, proc.sourceKey, proc)
-					if (proc.kills or 0) == 0 and (proc.hits or 0) == 0 and proc.name and AZSSpellMeter_Ledger.MeterByName then
-						local who = proc.actorId
-						local actors = AZSSpellMeter_Ledger.SpellActors
-						local info = actors and actors[proc.name]
-						if info and info.hero and (not who or who == "") then
-							who = "\031"
-						end
-						local named = AZSSpellMeter_Ledger.MeterByName(proc.name, who)
-						if named then
-							proc.hits = named.hits or 0
-							proc.crits = named.crits or 0
-							proc.kills = named.kills or 0
-							proc.best = named.best or 0
-						end
-					end
-					if line.actorPack then
-						seen = {}
-						takeAll(proc.sourceKeys, proc.sourceKey, row)
-					end
-				end
-			end
-		end
-		if line.actorPack and row.procs then
-			local sum = 0
-			local pk
-			for pk = 1, table.getn(row.procs) do
-				local one = row.procs[pk]
-				if one and not one.summon then
-					sum = sum + (one.kills or 0)
-				end
-			end
-			if sum > (row.kills or 0) then
-				row.kills = sum
-			end
+		AZSSpellMeter_Ledger.ApplyHits(row, line)
+		if line.actorPack and (row.kills or 0) == 0 then
+			AZSSpellMeter_Ledger.FillActorKills(row, line, spells, toEnglish)
 		end
 		return
 	end
@@ -448,19 +691,7 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 			if proc and proc.name and proc.name ~= "" and not proc.summon then
 				local rec = nil
 				if line.actorPack then
-					rec = spells[row.name .. "\031" .. proc.name]
-					if not rec and toEnglish then
-						rec = spells[row.name .. "\031" .. (toEnglish(proc.name) or proc.name)]
-					end
-					if not rec and AZSSpellMeter_LogSpell then
-						local alias = AZSSpellMeter_LogSpell[proc.name]
-						if not alias and toEnglish then
-							alias = AZSSpellMeter_LogSpell[toEnglish(proc.name)]
-						end
-						if alias then
-							rec = spells[row.name .. "\031" .. alias]
-						end
-					end
+					rec = AZSSpellMeter_Ledger.ActorLog(spells, row.name, proc.name, toEnglish)
 				else
 					rec = spells[proc.name]
 					if not rec and toEnglish then
@@ -474,20 +705,17 @@ function AZSSpellMeter_Ledger.ApplyCombat(row, line, spells, toEnglish)
 					if (rec.best or 0) > (proc.best or 0) then
 						proc.best = rec.best
 					end
+				else
+					proc.hits = 0
+					proc.crits = 0
+					proc.kills = 0
+					proc.best = 0
 				end
 			end
 		end
 	end
-	if line.actorPack and row.procs then
-		local sum = 0
-		local pk
-		for pk = 1, table.getn(row.procs) do
-			local one = row.procs[pk]
-			if one and not one.summon then
-				sum = sum + (one.kills or 0)
-			end
-		end
-		row.kills = (row.kills or 0) + sum
+	if line.actorPack then
+		AZSSpellMeter_Ledger.FillActorKills(row, line, spells, toEnglish)
 	end
 end
 
@@ -1407,6 +1635,10 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 					if actor and actor.summonKey and AZSSpellMeter_Ledger.Warlock[actor.summonKey] then
 						pet.actorPack = "minion"
 					end
+					-- A shaman keeps a few totems out. Each one is its own row.
+					if kind == "totem" or (actor and actor.totemKey and actor.totemKey ~= "") then
+						pet.actorPack = "totem"
+					end
 					pets[raw.actorId] = pet
 					petOrder[table.getn(petOrder) + 1] = pet
 				end
@@ -1524,6 +1756,13 @@ function AZSSpellMeter_Ledger.Pull(mode, focus, window, healDone, flat)
 							end
 							if (not found.icon or found.icon == "") and add.icon and add.icon ~= "" then
 								found.icon = add.icon
+							end
+							AZSSpellMeter_Ledger.AddKey(found, add.sourceKey)
+							if add.sourceKeys then
+								local ki
+								for ki = 1, table.getn(add.sourceKeys) do
+									AZSSpellMeter_Ledger.AddKey(found, add.sourceKeys[ki])
+								end
 							end
 						else
 							local slot = 1
