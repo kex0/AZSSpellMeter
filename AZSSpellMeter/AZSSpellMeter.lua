@@ -5529,7 +5529,7 @@ end
 -- Keep a DPS/HPS trail for every view, even when that tab and the graph window
 -- are closed. The graph only draws what is already stored here.
 -- Global on purpose: this chunk is at the Lua 5.0 local limit.
-function sampleAllRates()
+function sampleAllRates(paint)
 	if not state then
 		return
 	end
@@ -5548,7 +5548,7 @@ function sampleAllRates()
 		end
 	end
 	local live = viewMode()
-	local modes = { "damage", "healing", "boss", "taken", "party" }
+	local modes = AZSSpellMeter_Ledger.RateModes
 	local mi
 	for mi = 1, table.getn(modes) do
 		local mode = modes[mi]
@@ -5556,14 +5556,14 @@ function sampleAllRates()
 		-- once a second is enough for the line, and a full breakdown costs more
 		-- the longer the fight goes.
 		local hot = false
-		if frame and frame:IsShown() and mode == live then
+		if paint and frame and frame:IsShown() and mode == live then
 			hot = true
 		end
-		if bubble and bubble:IsShown() and mode == live then
+		if paint and bubble and bubble:IsShown() and mode == live then
 			hot = true
 		end
 		local pop = popped[mode]
-		if pop and pop:IsShown() and mode == AZSSpellMeter_ExtraMode then
+		if paint and pop and pop:IsShown() and mode == AZSSpellMeter_ExtraMode then
 			hot = true
 		end
 		if isGraphOpen(mode) or (isMainGraphOpen() and mode == live) then
@@ -5622,12 +5622,27 @@ function AZSSpellMeter_StoreRate(mode, rateMode, now)
 			end
 		end
 	end
-	local bucket = {}
+	-- One bucket per rate trail, reused on every sample. recentRate copies
+	-- the numbers out, so nothing keeps a reference to it.
+	local buckets = AZSSpellMeter_Ledger.RateBuckets
+	if not buckets then
+		buckets = {}
+		AZSSpellMeter_Ledger.RateBuckets = buckets
+	end
+	local bucket = buckets[rateMode]
+	if not bucket then
+		bucket = {}
+		buckets[rateMode] = bucket
+	end
+	local name, row
+	for name, row in pairs(bucket) do
+		row.seen = nil
+	end
 	if lines then
 		local i
 		for i = 1, table.getn(lines) do
 			local line = lines[i]
-			local name = line.name
+			name = line.name
 			local baseName = name
 			if line.baseKey then
 				baseName = line.baseKey
@@ -5641,8 +5656,21 @@ function AZSSpellMeter_StoreRate(mode, rateMode, now)
 						dealt = 0
 					end
 				end
-				bucket[name] = { damage = dealt }
+				row = bucket[name]
+				if not row then
+					row = {}
+					bucket[name] = row
+				end
+				row.damage = dealt
+				row.seen = true
 			end
+		end
+	end
+	-- A spell that left the meter leaves the bucket. Setting a field to nil
+	-- while walking the table is allowed in Lua.
+	for name, row in pairs(bucket) do
+		if not row.seen then
+			bucket[name] = nil
 		end
 	end
 	local rate = recentRate(rateMode, now, meterTot, bucket)
@@ -5691,16 +5719,24 @@ function AZSSpellMeter_PickExtra()
 	AZSSpellMeter_ExtraMode = list[turn]
 end
 
-local function refresh()
-	if not frame or not state then
-		return
-	end
+-- Everything a paint needs that must also run between paints: the run and
+-- death watch and the rate trails. paint is false on the driver's ticks
+-- between paints; then only an open graph samples at full speed.
+-- Global: the main chunk is at Lua 5.0's local limit.
+function AZSSpellMeter_Sample(paint)
 	AZSSpellMeter_PickExtra()
 	watchRun()
 	noteDeath()
 	-- Store every view's rate trail before painting, so opening the graph later
 	-- still has the full run with no holes.
-	sampleAllRates()
+	sampleAllRates(paint)
+end
+
+local function refresh()
+	if not frame or not state then
+		return
+	end
+	AZSSpellMeter_Sample(true)
 	if anyMeterShown() then
 		hideStockMeter()
 	end
@@ -8963,6 +8999,9 @@ end
 local function trackTip(owner, fill)
 	tipOwner = owner
 	tipFill = fill
+	if frame then
+		frame.tipWait = 0
+	end
 	if tipFill then
 		tipFill()
 	end
@@ -10133,9 +10172,12 @@ createDetached = function(mode)
 			win.clampWait = 0
 		else
 			win.clampWait = (win.clampWait or 0) + (arg1 or 0)
-			if win.clampWait >= 0.2 and clampIntoView(win, 120, 20) then
-				savePop(win)
-				noteClamped()
+			if win.clampWait >= 0.2 then
+				win.clampWait = 0
+				if clampIntoView(win, 120, 20) then
+					savePop(win)
+					noteClamped()
+				end
 			end
 		end
 	end)
@@ -10324,9 +10366,13 @@ local function onMainUpdate()
 		frame.clampWait = 0
 	else
 		frame.clampWait = (frame.clampWait or 0) + (arg1 or 0)
-		if frame.clampWait >= 0.2 and clampIntoView(frame, 120, 20) then
-			savePoint()
-			noteClamped()
+		-- Check five times a second, not every frame once 0.2 s have passed.
+		if frame.clampWait >= 0.2 then
+			frame.clampWait = 0
+			if clampIntoView(frame, 120, 20) then
+				savePoint()
+				noteClamped()
+			end
 		end
 	end
 	local now = GetTime()
@@ -10350,8 +10396,14 @@ local function onMainUpdate()
 	end
 	-- Meter refresh / DPS sampling is owned by the driver so the graph trail
 	-- keeps moving even when this window or the graph pane is hidden.
+	-- An open tip refills five times a second. It still follows the mouse
+	-- every frame.
 	if tipFill then
-		tipFill()
+		frame.tipWait = (frame.tipWait or 0) + (arg1 or 0)
+		if frame.tipWait >= 0.2 then
+			frame.tipWait = 0
+			tipFill()
+		end
 	end
 	placeTip()
 end
@@ -10390,7 +10442,7 @@ local function buildSettings()
 	local box = CreateFrame("Frame", "AZSSpellMeterSettings", UIParent)
 	settings = box
 	box:SetWidth(248)
-	box:SetHeight(748)
+	box:SetHeight(784)
 	box:SetFrameStrata("DIALOG")
 	box:SetMovable(true)
 	box:EnableMouse(true)
@@ -10575,7 +10627,11 @@ local function buildSettings()
 	local opSlider, opValue = makeSlider(-118, "Background", 0, 100, 1)
 	box.opSlider = opSlider
 	box.opValue = opValue
-	local dpsSlider, dpsValue, dpsName = makeSlider(-202, "DPS window", 5, 120, 5)
+	-- Hundredths of a second, so the 0.25 s step stays a whole number.
+	local refreshSlider, refreshValue = makeSlider(-154, "Refresh rate", 25, 200, 25)
+	box.refreshSlider = refreshSlider
+	box.refreshValue = refreshValue
+	local dpsSlider, dpsValue, dpsName = makeSlider(-238, "DPS window", 5, 120, 5)
 	box.dpsSlider = dpsSlider
 	box.dpsValue = dpsValue
 	box.dpsName = dpsName
@@ -10625,40 +10681,40 @@ local function buildSettings()
 	end
 
 	sectionTitle(-28, "Window")
-	box.lockHit = makeCheck(-158, "Lock windows")
+	box.lockHit = makeCheck(-194, "Lock windows")
 	box.lockMark = box.lockHit.mark
 
-	sectionTitle(-184, "DPS")
-	box.dpsAllHit = makeCheck(-240, "Since the start")
+	sectionTitle(-220, "DPS")
+	box.dpsAllHit = makeCheck(-276, "Since the start")
 	box.dpsAllMark = box.dpsAllHit.mark
 
-	sectionTitle(-266, "Rows")
-	box.flatHit = makeCheck(-284, "Each spell alone")
+	sectionTitle(-302, "Rows")
+	box.flatHit = makeCheck(-320, "Each spell alone")
 	box.flatMark = box.flatHit.mark
-	box.detailHit = makeCheck(-302, "Under the spell")
+	box.detailHit = makeCheck(-338, "Under the spell")
 	box.detailMark = box.detailHit.mark
-	box.wrapHit = makeCheck(-320, "Wrap names")
+	box.wrapHit = makeCheck(-356, "Wrap names")
 	box.wrapMark = box.wrapHit.mark
-	box.cdHit = makeCheck(-338, "Cooldown bars")
+	box.cdHit = makeCheck(-374, "Cooldown bars")
 	box.cdMark = box.cdHit.mark
-	box.fillTopHit = makeCheck(-356, "Bars vs top spell")
+	box.fillTopHit = makeCheck(-392, "Bars vs top spell")
 	box.fillTopMark = box.fillTopHit.mark
-	box.sameBrightHit = makeCheck(-374, "Same brightness")
+	box.sameBrightHit = makeCheck(-410, "Same brightness")
 	box.sameBrightMark = box.sameBrightHit.mark
 
-	sectionTitle(-396, "Columns")
-	box.colKillHit = makeCheck(-414, "Kills", 12, 110)
-	box.colDmgHit = makeCheck(-414, "Amount", 124, 110)
-	box.colShareHit = makeCheck(-432, "Share", 12, 110)
-	box.colDpsHit = makeCheck(-432, "DPS", 124, 110)
+	sectionTitle(-432, "Columns")
+	box.colKillHit = makeCheck(-450, "Kills", 12, 110)
+	box.colDmgHit = makeCheck(-450, "Amount", 124, 110)
+	box.colShareHit = makeCheck(-468, "Share", 12, 110)
+	box.colDpsHit = makeCheck(-468, "DPS", 124, 110)
 
-	sectionTitle(-454, "Views")
-	box.tabDamageHit = makeCheck(-472, "Damage", 12, 110)
-	box.tabHealingHit = makeCheck(-472, "Healing", 124, 110)
-	box.tabBossHit = makeCheck(-490, "Boss", 12, 110)
-	box.tabTakenHit = makeCheck(-490, "Taken", 124, 110)
+	sectionTitle(-490, "Views")
+	box.tabDamageHit = makeCheck(-508, "Damage", 12, 110)
+	box.tabHealingHit = makeCheck(-508, "Healing", 124, 110)
+	box.tabBossHit = makeCheck(-526, "Boss", 12, 110)
+	box.tabTakenHit = makeCheck(-526, "Taken", 124, 110)
 
-	sectionTitle(-512, "Colors")
+	sectionTitle(-548, "Colors")
 
 	local picks = {
 		{ key = "panel", name = "Window", tip = "Background of the meter windows." },
@@ -10679,7 +10735,7 @@ local function buildSettings()
 		local b = CreateFrame("Button", nil, box)
 		b:SetWidth(sw)
 		b:SetHeight(sw)
-		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -530)
+		b:SetPoint("TOPLEFT", box, "TOPLEFT", startX + (si - 1) * (sw + gap), -566)
 		b:SetBackdrop(roundBackdrop(8))
 		b.key = spec.key
 		b.pickName = spec.name
@@ -10701,15 +10757,15 @@ local function buildSettings()
 	end
 
 	local caption = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -558)
+	caption:SetPoint("TOPLEFT", box, "TOPLEFT", 12, -594)
 	caption:SetText("Window")
 	face(caption, 10)
 	caption:SetTextColor(1, 0.9, 0.62)
 	box.caption = caption
 
-	local redSlider, redValue, redName = makeSlider(-576, "Red", 0, 255, 1)
-	local greenSlider, greenValue, greenName = makeSlider(-608, "Green", 0, 255, 1)
-	local blueSlider, blueValue, blueName = makeSlider(-640, "Blue", 0, 255, 1)
+	local redSlider, redValue, redName = makeSlider(-612, "Red", 0, 255, 1)
+	local greenSlider, greenValue, greenName = makeSlider(-644, "Green", 0, 255, 1)
+	local blueSlider, blueValue, blueName = makeSlider(-676, "Blue", 0, 255, 1)
 	redName:SetTextColor(1, 0.55, 0.45)
 	greenName:SetTextColor(0.55, 0.9, 0.55)
 	blueName:SetTextColor(0.55, 0.75, 1)
@@ -10752,6 +10808,9 @@ local function buildSettings()
 		local op = snap(pa * 100, 1, 0, 100)
 		box.opSlider:SetValue(op)
 		box.opValue:SetText(op .. "%")
+		local rate = AZSSpellMeter_RefreshRate()
+		box.refreshSlider:SetValue(rate * 100)
+		box.refreshValue:SetText(string.format("%.2f s", rate))
 		local window = snap(tonumber(lookValue("dps")) or 30, 5, 5, 120)
 		box.dpsSlider:SetValue(window)
 		if lookValue("dpsAll") then
@@ -10911,6 +10970,19 @@ local function buildSettings()
 		end
 		refresh()
 	end
+	local function writeRefresh()
+		if box.quiet then
+			return
+		end
+		local steps = snap(refreshSlider:GetValue() or 100, 25, 25, 200)
+		if math.abs((refreshSlider:GetValue() or steps) - steps) > 0.01 then
+			box.quiet = true
+			refreshSlider:SetValue(steps)
+			box.quiet = false
+		end
+		ensureLook().refresh = steps / 100
+		refreshValue:SetText(string.format("%.2f s", steps / 100))
+	end
 	local function writeRgb()
 		if box.quiet then
 			return
@@ -10957,6 +11029,16 @@ local function buildSettings()
 	end)
 	fadeSlider:SetScript("OnValueChanged", writeFade)
 	opSlider:SetScript("OnValueChanged", writeOp)
+	refreshSlider:SetScript("OnValueChanged", writeRefresh)
+	refreshSlider:SetScript("OnEnter", function()
+		showTip(this, "RIGHT", "Refresh rate", nil, {
+			{ "How often the meter windows redraw.", 1, 1, 1 },
+			{ "Slower uses less time per frame. The DPS graph keeps its own pace.", 0.75, 0.75, 0.75 },
+		})
+	end)
+	refreshSlider:SetScript("OnLeave", function()
+		leaveTip()
+	end)
 	dpsSlider:SetScript("OnValueChanged", writeDps)
 	dpsSlider:SetScript("OnEnter", function()
 		showTip(this, "RIGHT", "DPS window", nil, {
@@ -11961,17 +12043,24 @@ local function onCreatureDeath(msg)
 		_, _, name = string.find(msg, "^You have slain (.+)!")
 	end
 	if name then
+		-- Hits not read yet may hold this enemy's last blow.
+		if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.HitLive and AZSSpellMeter_Ledger.ReadHits then
+			AZSSpellMeter_Ledger.ReadHits()
+		end
+		-- The driver's next tick paints the kill. A refresh per death was the
+		-- whole meter rebuilt dozens of times a second in a big pull.
 		noteKill(name)
-		refresh()
 	end
 end
 
 local function onCombat(kind)
-	if AZSSpellMeter_TouchBoss then
-		AZSSpellMeter_TouchBoss()
-	end
+	-- Live combat text carries the hits. The driver's tick keeps the boss
+	-- fight current, so a log line costs nothing then.
 	if AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.HitLive then
 		return
+	end
+	if AZSSpellMeter_TouchBoss then
+		AZSSpellMeter_TouchBoss()
 	end
 	ingest(arg1, kind)
 end
@@ -11994,7 +12083,34 @@ local function onEvent()
 		return
 	end
 	noteItemText(arg1)
-	if event == "PLAYER_ENTERING_WORLD" then
+	local handler = AZSSpellMeter_On[event]
+	if handler then
+		handler()
+	end
+end
+
+-- Seconds between two paints of the meter windows, from settings. Snapped to
+-- 0.25 s steps between 0.25 and 2, and 1 when unset.
+function AZSSpellMeter_RefreshRate()
+	local look = AZSSpellMeterDB and AZSSpellMeterDB.look
+	local v = look and tonumber(look.refresh)
+	if not v then
+		return 1
+	end
+	v = math.floor(v * 4 + 0.5) / 4
+	if v < 0.25 then
+		v = 0.25
+	elseif v > 2 then
+		v = 2
+	end
+	return v
+end
+
+-- One handler per event, found with a single lookup. Every key here is also
+-- registered on the driver below. Everything in this block stays global or a
+-- table field: the main chunk is at Lua 5.0's limit of 200 locals.
+AZSSpellMeter_On = {
+	PLAYER_ENTERING_WORLD = function()
 		clockOn = true
 		dead = UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") and true or false
 		if stateKey ~= playerKey() then
@@ -12006,108 +12122,101 @@ local function onEvent()
 		widenCombatLog()
 		queueScan()
 		refresh()
-	elseif event == "PLAYER_LEVEL_UP" or event == "UNIT_LEVEL" then
-		if event == "UNIT_LEVEL" and arg1 ~= "player" then
-			return
-		end
+	end,
+	PLAYER_LEVEL_UP = function()
 		checkLevel()
-	elseif event == "PLAYER_DEAD" then
+	end,
+	UNIT_LEVEL = function()
+		if arg1 == "player" then
+			checkLevel()
+		end
+	end,
+	PLAYER_DEAD = function()
 		dead = true
 		syncClock()
-	elseif event == "PLAYER_ALIVE" or event == "PLAYER_UNGHOST" then
+	end,
+	PLAYER_ALIVE = function()
 		dead = false
 		syncClock()
-	elseif event == "PLAYER_LOGOUT" then
+	end,
+	PLAYER_LOGOUT = function()
 		foldTime()
-	elseif event == "LOOT_OPENED" or event == "GOSSIP_SHOW" or event == "QUEST_DETAIL" or event == "QUEST_PROGRESS" or event == "QUEST_COMPLETE" or event == "ITEM_TEXT_BEGIN" then
+	end,
+	LOOT_OPENED = function()
 		beginChoice()
-	elseif event == "CHAT_MSG_SYSTEM" or event == "CHAT_MSG_RAID_BOSS_EMOTE" or event == "CHAT_MSG_MONSTER_EMOTE" or event == "CHAT_MSG_MONSTER_YELL" or event == "CHAT_MSG_TEXT_EMOTE" then
+	end,
+	CHAT_MSG_SYSTEM = function()
 		if choiceMessage(arg1) then
 			beginChoice()
 		end
-	elseif event == "SPELLS_CHANGED" or event == "ACTIONBAR_SLOT_CHANGED" or event == "ACTIONBAR_PAGE_CHANGED" or event == "LEARNED_SPELL_IN_TAB" or event == "BAG_UPDATE" then
+	end,
+	SPELLS_CHANGED = function()
 		queueScan()
-	elseif event == "UNIT_INVENTORY_CHANGED" then
+	end,
+	UNIT_INVENTORY_CHANGED = function()
 		if arg1 == "player" then
 			queueScan()
 		end
-	elseif event == "CHAT_MSG_SPELL_SELF_DAMAGE" or event == "CHAT_MSG_COMBAT_SELF_HITS" or event == "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF" or event == "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS" then
-		onCombat("yours")
-	elseif event == "CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE"
-		or event == "CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_DAMAGE"
-		or event == "CHAT_MSG_SPELL_PERIODIC_FRIENDLYPLAYER_DAMAGE" then
-		onCombat("periodic")
-	elseif event == "CHAT_MSG_SPELL_PET_DAMAGE" then
-		onCombat("pet")
-	elseif event == "CHAT_MSG_COMBAT_PET_HITS" then
-		onCombat("petmelee")
-	elseif event == "CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE" then
-		-- Extra minions often log as friendly NPCs while only Unit("pet") uses PET_*.
-		onCombat("summon")
-	elseif event == "CHAT_MSG_COMBAT_FRIENDLYPLAYER_HITS" then
-		onCombat("summonmelee")
-	elseif event == "CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE"
-		or event == "CHAT_MSG_SPELL_CREATURE_VS_PARTY_DAMAGE"
-		or event == "CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE" then
-		onCombat("summon")
-	elseif event == "CHAT_MSG_COMBAT_CREATURE_VS_CREATURE_HITS"
-		or event == "CHAT_MSG_COMBAT_CREATURE_VS_PARTY_HITS"
-		or event == "CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS" then
-		onCombat("summonmelee")
-	elseif event == "CHAT_MSG_COMBAT_HOSTILE_DEATH" or event == "CHAT_MSG_COMBAT_HOSTILEPLAYER_DEATH" then
+	end,
+	CHAT_MSG_COMBAT_HOSTILE_DEATH = function()
 		onCreatureDeath(arg1)
+	end,
+}
+AZSSpellMeter_On.PLAYER_UNGHOST = AZSSpellMeter_On.PLAYER_ALIVE
+AZSSpellMeter_On.GOSSIP_SHOW = AZSSpellMeter_On.LOOT_OPENED
+AZSSpellMeter_On.QUEST_DETAIL = AZSSpellMeter_On.LOOT_OPENED
+AZSSpellMeter_On.QUEST_PROGRESS = AZSSpellMeter_On.LOOT_OPENED
+AZSSpellMeter_On.QUEST_COMPLETE = AZSSpellMeter_On.LOOT_OPENED
+AZSSpellMeter_On.ITEM_TEXT_BEGIN = AZSSpellMeter_On.LOOT_OPENED
+AZSSpellMeter_On.CHAT_MSG_RAID_BOSS_EMOTE = AZSSpellMeter_On.CHAT_MSG_SYSTEM
+AZSSpellMeter_On.CHAT_MSG_MONSTER_EMOTE = AZSSpellMeter_On.CHAT_MSG_SYSTEM
+AZSSpellMeter_On.CHAT_MSG_MONSTER_YELL = AZSSpellMeter_On.CHAT_MSG_SYSTEM
+AZSSpellMeter_On.CHAT_MSG_TEXT_EMOTE = AZSSpellMeter_On.CHAT_MSG_SYSTEM
+AZSSpellMeter_On.ACTIONBAR_SLOT_CHANGED = AZSSpellMeter_On.SPELLS_CHANGED
+AZSSpellMeter_On.ACTIONBAR_PAGE_CHANGED = AZSSpellMeter_On.SPELLS_CHANGED
+AZSSpellMeter_On.LEARNED_SPELL_IN_TAB = AZSSpellMeter_On.SPELLS_CHANGED
+AZSSpellMeter_On.BAG_UPDATE = AZSSpellMeter_On.SPELLS_CHANGED
+AZSSpellMeter_On.CHAT_MSG_COMBAT_HOSTILEPLAYER_DEATH = AZSSpellMeter_On.CHAT_MSG_COMBAT_HOSTILE_DEATH
+
+function AZSSpellMeter_OnCombat(kind)
+	return function()
+		onCombat(kind)
 	end
 end
+AZSSpellMeter_On.CHAT_MSG_SPELL_SELF_DAMAGE = AZSSpellMeter_OnCombat("yours")
+AZSSpellMeter_On.CHAT_MSG_COMBAT_SELF_HITS = AZSSpellMeter_On.CHAT_MSG_SPELL_SELF_DAMAGE
+AZSSpellMeter_On.CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF = AZSSpellMeter_On.CHAT_MSG_SPELL_SELF_DAMAGE
+AZSSpellMeter_On.CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS = AZSSpellMeter_On.CHAT_MSG_SPELL_SELF_DAMAGE
+AZSSpellMeter_On.CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE = AZSSpellMeter_OnCombat("periodic")
+AZSSpellMeter_On.CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_DAMAGE = AZSSpellMeter_On.CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE
+AZSSpellMeter_On.CHAT_MSG_SPELL_PERIODIC_FRIENDLYPLAYER_DAMAGE = AZSSpellMeter_On.CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE
+AZSSpellMeter_On.CHAT_MSG_SPELL_PET_DAMAGE = AZSSpellMeter_OnCombat("pet")
+AZSSpellMeter_On.CHAT_MSG_COMBAT_PET_HITS = AZSSpellMeter_OnCombat("petmelee")
+-- Extra minions often log as friendly NPCs while only Unit("pet") uses PET_*.
+AZSSpellMeter_On.CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE = AZSSpellMeter_OnCombat("summon")
+AZSSpellMeter_On.CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE = AZSSpellMeter_On.CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE
+AZSSpellMeter_On.CHAT_MSG_SPELL_CREATURE_VS_PARTY_DAMAGE = AZSSpellMeter_On.CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE
+AZSSpellMeter_On.CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE = AZSSpellMeter_On.CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE
+AZSSpellMeter_On.CHAT_MSG_COMBAT_FRIENDLYPLAYER_HITS = AZSSpellMeter_OnCombat("summonmelee")
+AZSSpellMeter_On.CHAT_MSG_COMBAT_CREATURE_VS_CREATURE_HITS = AZSSpellMeter_On.CHAT_MSG_COMBAT_FRIENDLYPLAYER_HITS
+AZSSpellMeter_On.CHAT_MSG_COMBAT_CREATURE_VS_PARTY_HITS = AZSSpellMeter_On.CHAT_MSG_COMBAT_FRIENDLYPLAYER_HITS
+AZSSpellMeter_On.CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS = AZSSpellMeter_On.CHAT_MSG_COMBAT_FRIENDLYPLAYER_HITS
 
 local driver = CreateFrame("Frame", "AZSSpellMeterDriver")
+-- ADDON_LOADED is handled before the lookup. CHAT_MSG_LOOT only feeds item
+-- links to noteItemText, which every event passes through.
 driver:RegisterEvent("ADDON_LOADED")
-driver:RegisterEvent("PLAYER_ENTERING_WORLD")
-driver:RegisterEvent("PLAYER_LEVEL_UP")
-driver:RegisterEvent("UNIT_LEVEL")
-driver:RegisterEvent("PLAYER_DEAD")
-driver:RegisterEvent("PLAYER_ALIVE")
-driver:RegisterEvent("PLAYER_UNGHOST")
-driver:RegisterEvent("PLAYER_LOGOUT")
-driver:RegisterEvent("LOOT_OPENED")
-driver:RegisterEvent("GOSSIP_SHOW")
-driver:RegisterEvent("QUEST_DETAIL")
-driver:RegisterEvent("QUEST_PROGRESS")
-driver:RegisterEvent("QUEST_COMPLETE")
-driver:RegisterEvent("ITEM_TEXT_BEGIN")
-driver:RegisterEvent("CHAT_MSG_SYSTEM")
-driver:RegisterEvent("CHAT_MSG_RAID_BOSS_EMOTE")
-driver:RegisterEvent("CHAT_MSG_MONSTER_EMOTE")
-driver:RegisterEvent("CHAT_MSG_MONSTER_YELL")
-driver:RegisterEvent("CHAT_MSG_TEXT_EMOTE")
-driver:RegisterEvent("CHAT_MSG_COMBAT_HOSTILE_DEATH")
-driver:RegisterEvent("CHAT_MSG_COMBAT_HOSTILEPLAYER_DEATH")
-driver:RegisterEvent("SPELLS_CHANGED")
-driver:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
-driver:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
-	driver:RegisterEvent("LEARNED_SPELL_IN_TAB")
-	driver:RegisterEvent("BAG_UPDATE")
-	driver:RegisterEvent("UNIT_INVENTORY_CHANGED")
-	driver:RegisterEvent("CHAT_MSG_LOOT")
-driver:RegisterEvent("CHAT_MSG_SPELL_SELF_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_COMBAT_SELF_HITS")
-driver:RegisterEvent("CHAT_MSG_SPELL_DAMAGESHIELDS_ON_SELF")
-driver:RegisterEvent("CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS")
-driver:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_HOSTILEPLAYER_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_SPELL_PERIODIC_FRIENDLYPLAYER_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_SPELL_PET_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_COMBAT_PET_HITS")
-driver:RegisterEvent("CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_COMBAT_FRIENDLYPLAYER_HITS")
-driver:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_PARTY_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_SPELL_CREATURE_VS_SELF_DAMAGE")
-driver:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_CREATURE_HITS")
-driver:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_PARTY_HITS")
-driver:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS")
+driver:RegisterEvent("CHAT_MSG_LOOT")
+table.foreach(AZSSpellMeter_On, function(name)
+	driver:RegisterEvent(name)
+end)
 driver:SetScript("OnEvent", onEvent)
 driver:SetScript("OnUpdate", function()
-	if state and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ReadHits then
+	-- Combat text is read 20 times a second, not every frame. A death reads
+	-- it first on its own, so the kill still goes to the last hit.
+	driver.hitTick = (driver.hitTick or 0) + (arg1 or 0)
+	if driver.hitTick >= 0.05 and state and AZSSpellMeter_Ledger and AZSSpellMeter_Ledger.ReadHits then
+		driver.hitTick = 0
 		if state.bossFight then
 			AZSSpellMeter_Ledger.BossUp = true
 		else
@@ -12123,16 +12232,26 @@ driver:SetScript("OnUpdate", function()
 		end
 	end
 	driver.tick = (driver.tick or 0) + (arg1 or 0)
-	if driver.tick < 0.2 then
+	driver.paint = (driver.paint or 0) + (arg1 or 0)
+	if driver.tick < 0.2 and driver.paint < AZSSpellMeter_RefreshRate() then
 		return
 	end
 	driver.tick = 0
 	if not state then
 		return
 	end
-	-- Always pulse. The DPS graph trail must keep sampling while the graph
-	-- window is closed; tying refresh to a visible meter pane left holes that
-	-- drew as straight diagonals when the graph was opened again.
+	AZSSpellMeter_TouchBoss()
+	-- Painting follows the refresh rate from settings. The rate trails keep
+	-- their own pace in between, so the graph line stays as fine.
+	if driver.paint < AZSSpellMeter_RefreshRate() then
+		AZSSpellMeter_Sample(false)
+		return
+	end
+	driver.paint = 0
+	-- The DPS graph trail must keep sampling while the graph window is closed;
+	-- tying it to a visible meter pane left holes that drew as straight
+	-- diagonals when the graph was opened again. Sample above does that between
+	-- paints, and refresh samples before it paints.
 	refresh()
 end)
 

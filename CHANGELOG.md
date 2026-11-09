@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.39.4
+
+- Settings has a Refresh rate under Window, from 0.25 to 2 seconds in 0.25 s steps. It sets how often the meter windows redraw and starts at 1 second. The DPS graph keeps sampling at its own pace, so its line stays as fine. Clicks, tab changes, and settings still redraw at once.
+- A kill no longer redraws the whole meter. It shows on the next redraw, so a big pull with many deaths costs far less.
+- Combat text is read 20 times a second instead of every frame. A death reads it first, so the kill still goes to the spell that landed the last hit.
+- Hits, the boss fight check, window placement, and open tips do less work per frame. Long runs no longer keep every hit's id.
+
 ## 1.39.3
 
 - Totems each stay on their own row. They are no longer grouped together as pets.

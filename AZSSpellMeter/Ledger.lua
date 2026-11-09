@@ -4,6 +4,9 @@
 
 AZSSpellMeter_Ledger = {}
 
+-- Every view that keeps a DPS/HPS trail, in sampling order.
+AZSSpellMeter_Ledger.RateModes = { "damage", "healing", "boss", "taken", "party" }
+
 AZSSpellMeter_Ledger.OwnName = {
 	["Flurry"] = true,
 	["Shockwave"] = true,
@@ -1956,6 +1959,7 @@ end
 function AZSSpellMeter_Ledger.WipeHits()
 	local book = AZSSpellMeter_Ledger.HitSaved
 	AZSSpellMeter_Ledger.HitSeen = {}
+	AZSSpellMeter_Ledger.HitSeenOld = nil
 	AZSSpellMeter_Ledger.BestHit = nil
 	AZSSpellMeter_Ledger.BossBest = nil
 	if book then
@@ -1998,6 +2002,82 @@ function AZSSpellMeter_Ledger.CreditKill(name)
 	return key
 end
 
+-- Seen event ids and cleaned target names live in two generations of at most
+-- SEEN_CAP entries. A full generation becomes the old one, so a run of any
+-- length holds at most twice that, and a recent duplicate is still caught.
+local SEEN_CAP = 4096
+local seenCount = 0
+local cleanNames = {}
+local cleanOld = {}
+local cleanCount = 0
+
+local function bumpHit(book, key, ev)
+	local rec = book[key]
+	if not rec then
+		rec = { hits = 0, crits = 0, kills = 0, best = 0 }
+		book[key] = rec
+	end
+	rec.hits = rec.hits + 1
+	if ev.critical then
+		rec.crits = rec.crits + 1
+		local amount = tonumber(ev.amount) or 0
+		if amount > (rec.best or 0) then
+			rec.best = amount
+		end
+	end
+	if ev.meterSource and ev.meterSource ~= "" then
+		rec.spell = ev.meterSource
+	end
+	if ev.sourceId and ev.sourceId ~= "" then
+		rec.who = ev.sourceId
+	end
+	return rec
+end
+
+local function cleanTarget(raw)
+	local name = cleanNames[raw] or cleanOld[raw]
+	if name then
+		return name
+	end
+	name = string.gsub(raw, "|c%x%x%x%x%x%x%x%x", "")
+	name = string.gsub(name, "|r", "")
+	name = string.gsub(name, "^%s+", "")
+	name = string.gsub(name, "%s+$", "")
+	name = string.gsub(name, "%.$", "")
+	if cleanCount >= SEEN_CAP then
+		cleanOld = cleanNames
+		cleanNames = {}
+		cleanCount = 0
+	end
+	cleanNames[raw] = name
+	cleanCount = cleanCount + 1
+	return name
+end
+
+-- True when this event id was taken before. Notes it otherwise.
+local function seenBefore(id)
+	local L = AZSSpellMeter_Ledger
+	local seen = L.HitSeen
+	if not seen then
+		seen = {}
+		L.HitSeen = seen
+		seenCount = 0
+	end
+	if seen[id] or (L.HitSeenOld and L.HitSeenOld[id]) then
+		return true
+	end
+	if seenCount >= SEEN_CAP then
+		L.HitSeenOld = seen
+		seen = {}
+		L.HitSeen = seen
+		seenCount = 0
+	end
+	seen[id] = true
+	seenCount = seenCount + 1
+	return false
+end
+
+-- KeepHits is left to ReadHits, once per read instead of once per hit.
 function AZSSpellMeter_Ledger.TakeHit(ev)
 	if type(ev) ~= "table" or ev.kind ~= "damage" then
 		return false
@@ -2010,45 +2090,15 @@ function AZSSpellMeter_Ledger.TakeHit(ev)
 	if not key or key == "" then
 		return false
 	end
-	if ev.eventId then
-		local seen = AZSSpellMeter_Ledger.HitSeen
-		if not seen then
-			seen = {}
-			AZSSpellMeter_Ledger.HitSeen = seen
-		end
-		if seen[ev.eventId] then
-			return true
-		end
-		seen[ev.eventId] = true
-	end
-	local function bump(book)
-		local rec = book[key]
-		if not rec then
-			rec = { hits = 0, crits = 0, kills = 0, best = 0 }
-			book[key] = rec
-		end
-		rec.hits = rec.hits + 1
-		local amount = tonumber(ev.amount) or 0
-		if ev.critical then
-			rec.crits = rec.crits + 1
-			if amount > (rec.best or 0) then
-				rec.best = amount
-			end
-		end
-		if ev.meterSource and ev.meterSource ~= "" then
-			rec.spell = ev.meterSource
-		end
-		if ev.sourceId and ev.sourceId ~= "" then
-			rec.who = ev.sourceId
-		end
-		return rec
+	if ev.eventId and seenBefore(ev.eventId) then
+		return true
 	end
 	local hits = AZSSpellMeter_Ledger.Hits
 	if not hits then
 		hits = {}
 		AZSSpellMeter_Ledger.Hits = hits
 	end
-	local rec = bump(hits)
+	local rec = bumpHit(hits, key, ev)
 	if rec.best and rec.best > (AZSSpellMeter_Ledger.BestHit or 0) then
 		AZSSpellMeter_Ledger.BestHit = rec.best
 	end
@@ -2058,18 +2108,14 @@ function AZSSpellMeter_Ledger.TakeHit(ev)
 			boss = {}
 			AZSSpellMeter_Ledger.BossHits = boss
 		end
-		local brow = bump(boss)
+		local brow = bumpHit(boss, key, ev)
 		if brow.best and brow.best > (AZSSpellMeter_Ledger.BossBest or 0) then
 			AZSSpellMeter_Ledger.BossBest = brow.best
 		end
 	end
 	local target = ev.targetName
 	if target and target ~= "" then
-		target = string.gsub(target, "|c%x%x%x%x%x%x%x%x", "")
-		target = string.gsub(target, "|r", "")
-		target = string.gsub(target, "^%s+", "")
-		target = string.gsub(target, "%s+$", "")
-		target = string.gsub(target, "%.$", "")
+		target = cleanTarget(target)
 		if target ~= "" then
 			local blows = AZSSpellMeter_Ledger.Blows
 			if not blows then
@@ -2079,7 +2125,6 @@ function AZSSpellMeter_Ledger.TakeHit(ev)
 			blows[target] = key
 		end
 	end
-	AZSSpellMeter_Ledger.KeepHits()
 	return true
 end
 
@@ -2101,6 +2146,7 @@ function AZSSpellMeter_Ledger.ReadHits()
 			AZSSpellMeter_Ledger.HitCursor = nil
 			AZSSpellMeter_Ledger.HitStream = nil
 			AZSSpellMeter_Ledger.HitSeen = nil
+			AZSSpellMeter_Ledger.HitSeenOld = nil
 		else
 			AZSSpellMeter_Ledger.HitStream = pack.streamId
 			local events = pack.events
