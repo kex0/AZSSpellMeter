@@ -5,11 +5,10 @@ name: Release
 # ("## 1.39.4") and push it first.
 #
 # The workflow sets "## Version:" in the toc, commits, tags v<version>, builds
-# AZSSpellMeter-<version>.zip, and creates the release. The zip holds an
-# AZSSpellMeter folder with the toc, every file the toc loads, the readme, the
-# changelog, and the preview. The release notes are the changelog section plus
-# the install line. Afterwards, pull the workflow's commit before the next
-# change.
+# AZSSpellMeter-<version>.zip, and creates the release. The zip holds the
+# AZSSpellMeter folder as it is in the repo, plus the readme, the changelog,
+# and the preview. The release notes are the changelog section plus the
+# install line. Afterwards, pull the workflow's commit before the next change.
 on:
   workflow_dispatch:
     inputs:
@@ -39,8 +38,8 @@ jobs:
             echo "::error::Version $VERSION exists already. Pick a higher number"
             exit 1
           fi
-          if ! grep -q '^## Version:' "$ADDON.toc"; then
-            echo "::error::$ADDON.toc has no '## Version:' line"
+          if ! grep -q '^## Version:' "$ADDON/$ADDON.toc"; then
+            echo "::error::$ADDON/$ADDON.toc has no '## Version:' line"
             exit 1
           fi
 
@@ -62,7 +61,7 @@ jobs:
             "Unzip into your AddOns folder, so the path ends in \`AddOns/$ADDON/$ADDON.toc\`. Relog." > "$RUNNER_TEMP/notes.md"
 
       - name: Set the version in the .toc
-        run: perl -pi -e 's/^## Version:[^\r\n]*/## Version: $ENV{VERSION}/' "$ADDON.toc"
+        run: perl -pi -e 's/^## Version:[^\r\n]*/## Version: $ENV{VERSION}/' "$ADDON/$ADDON.toc"
 
       - name: Commit, tag and push
         run: |
@@ -74,9 +73,9 @@ jobs:
 
       - name: Build the zip
         run: |
-          mkdir -p "$RUNNER_TEMP/dist/$ADDON"
-          files=$(grep -v '^\s*#' "$ADDON.toc" | grep -v '^\s*$' | tr -d '\r')
-          cp "$ADDON.toc" $files README.md CHANGELOG.md preview.png "$RUNNER_TEMP/dist/$ADDON/"
+          mkdir -p "$RUNNER_TEMP/dist"
+          cp -r "$ADDON" "$RUNNER_TEMP/dist/"
+          cp README.md CHANGELOG.md preview.png "$RUNNER_TEMP/dist/$ADDON/"
           cd "$RUNNER_TEMP/dist"
           zip -r "$ADDON-$VERSION.zip" "$ADDON"
 
