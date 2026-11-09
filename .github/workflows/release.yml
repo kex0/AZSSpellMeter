@@ -61,7 +61,9 @@ jobs:
             "Unzip into your AddOns folder, so the path ends in \`AddOns/$ADDON/$ADDON.toc\`. Relog." > "$RUNNER_TEMP/notes.md"
 
       - name: Set the version in the .toc
-        run: perl -pi -e 's/^## Version:[^\r\n]*/## Version: $ENV{VERSION}/' "$ADDON/$ADDON.toc"
+        # A block, because ": " in a plain one-line value is a YAML error.
+        run: |
+          perl -pi -e 's/^## Version:[^\r\n]*/## Version: $ENV{VERSION}/' "$ADDON/$ADDON.toc"
 
       - name: Commit, tag and push
         run: |
