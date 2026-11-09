@@ -1,0 +1,86 @@
+name: Release
+
+# Adds a "Run workflow" button under Actions -> Release. Type the new version
+# there, for example 1.39.4. Write that version's section in CHANGELOG.md
+# ("## 1.39.4") and push it first.
+#
+# The workflow sets "## Version:" in the toc, commits, tags v<version>, builds
+# AZSSpellMeter-<version>.zip, and creates the release. The zip holds an
+# AZSSpellMeter folder with the toc, every file the toc loads, the readme, the
+# changelog, and the preview. The release notes are the changelog section plus
+# the install line. Afterwards, pull the workflow's commit before the next
+# change.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version, for example 1.39.4 (no v in front)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      ADDON: AZSSpellMeter
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the version number
+        run: |
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::Write the version as numbers, for example 1.39.4 (no v in front)"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
+            echo "::error::Version $VERSION exists already. Pick a higher number"
+            exit 1
+          fi
+          if ! grep -q '^## Version:' "$ADDON.toc"; then
+            echo "::error::$ADDON.toc has no '## Version:' line"
+            exit 1
+          fi
+
+      # Before anything is committed, so a missing section stops the release.
+      - name: Write the release notes
+        run: |
+          awk -v head="## $VERSION" '
+            { sub(/\r$/, "") }
+            $0 == head { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md | sed '/./,$!d' > "$RUNNER_TEMP/section.md"
+          if ! grep -q . "$RUNNER_TEMP/section.md"; then
+            echo "::error::CHANGELOG.md has no section '## $VERSION'. Write it and push it first"
+            exit 1
+          fi
+          # $(...) drops the section's trailing blank lines.
+          printf '%s\n\n%s\n' "$(cat "$RUNNER_TEMP/section.md")" \
+            "Unzip into your AddOns folder, so the path ends in \`AddOns/$ADDON/$ADDON.toc\`. Relog." > "$RUNNER_TEMP/notes.md"
+
+      - name: Set the version in the .toc
+        run: perl -pi -e 's/^## Version:[^\r\n]*/## Version: $ENV{VERSION}/' "$ADDON.toc"
+
+      - name: Commit, tag and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release v$VERSION" || echo "The .toc already had version $VERSION"
+          git tag "v$VERSION"
+          git push origin HEAD "v$VERSION"
+
+      - name: Build the zip
+        run: |
+          mkdir -p "$RUNNER_TEMP/dist/$ADDON"
+          files=$(grep -v '^\s*#' "$ADDON.toc" | grep -v '^\s*$' | tr -d '\r')
+          cp "$ADDON.toc" $files README.md CHANGELOG.md preview.png "$RUNNER_TEMP/dist/$ADDON/"
+          cd "$RUNNER_TEMP/dist"
+          zip -r "$ADDON-$VERSION.zip" "$ADDON"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v$VERSION" "$RUNNER_TEMP/dist/$ADDON-$VERSION.zip" --title "$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
